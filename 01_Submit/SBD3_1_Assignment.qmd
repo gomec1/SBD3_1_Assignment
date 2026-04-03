@@ -1,0 +1,405 @@
+---
+title: "SBD3_1_Assignment"
+format: html
+---
+# Libraries
+```{r}
+library(dlookr)
+library(rsample)
+```
+
+# Setup
+```{r}
+rm(list=ls())
+options(scipen=999)
+getwd()
+set.seed(123)
+```
+
+# Loading Data
+```{r}
+load("data_wage.RData")
+head(data)
+```
+
+# Data Checks
+```{r}
+summary(data)
+```
+
+```{r}
+diagnose(data)
+# No Missing Values in the Dataset
+# All the numeric variables have only 2 values (0 and 1) except the target variable wage
+```
+
+```{r}
+str(data)
+
+# All the non numeric variables are factors with levels.
+```
+
+```{r}
+colnames(data)
+# Some of the Columns do not really add any value when considering the other variables in the dataset
+# For example:
+#
+# "Activities_None.of.these.activities.are.an.important.part.of.my.role.at.work"
+# "Notebooks_None" 
+# "cloud_I.have.not.used.any.cloud.providers" 
+# "ML_framework_None"
+# "Visualization_None"
+# "explainability.model_None.I.do.not.use.these.model.explanation.techniques"
+```
+## Numeric
+
+### Target Variable
+```{r}
+summary(data$wage)
+sd(data$wage)
+# right skewed distribution with a long tail. The mean is higher than the median, which indicates that there are some high wage values that are pulling the average up. The standard deviation is also quite large, which suggests that there is a lot of variability in wages among the individuals in the dataset.
+```
+
+
+```{r}
+boxplot(data$wage, horizontal = TRUE, main = "Boxplot of Wage", xlab = "Wage")
+hist(data$wage, breaks = 50, main = "Histogram of Wage", xlab = "Wage")
+```
+
+```{r}
+# Log Wage
+hist(log(data$wage[data$wage > 0]), breaks = 50, main = "Histogram of log(wage)")
+boxplot(log(data$wage[data$wage > 0]), horizontal = TRUE)
+```
+
+```{r}
+# 0 in Target variable "wage"
+sum(data$wage == 0)
+prop.table(table(data$wage == 0))
+data_no_0_wage <- data[data$wage > 0, ]
+```
+```{r}
+boxplot(data_no_0_wage$wage, horizontal = TRUE, main = "Boxplot of Wage", xlab = "Wage")
+hist(data_no_0_wage$wage, breaks = 50, main = "Histogram of Wage", xlab = "Wage")
+```
+
+### Features
+```{r}
+#Frequency
+print(table(data$Notebooks_None))
+  
+#Proportions 
+print(prop.table(table(data$Notebooks_None))) 
+```
+
+
+## Factors
+
+```{r}
+#Levels
+print(levels(data$gender))
+  
+#Frequency
+print(table(data$gender))
+  
+#Proportions
+print(round(prop.table(table(data$gender)), 2))
+
+#Ordered
+print(is.ordered(data$gender))
+# All the factors are unordered
+
+#Variable = ML_atWork
+#At first, we thought that the response "I do not know" would not be useful. However, it could be that interns genuinely do not know this. Additionally, there are many 
+#people who are not working—what did they select? Possibly this answer as well. There should be an answer option such as "I do not work".
+
+
+#Variable = Do.you.consider.yourself.to.be.a.data.scientist
+#The responses are purely subjective, which is why we will probably remove this variable.
+```
+
+
+# Data Cleaning
+
+## Order Factors
+```{r}
+# The following (factor) variables were treated as ordered:
+# - Age
+# - education
+# - years_experience
+# - How.long.have.you.been.writing.code.to.analyze.data.
+# - percent_actively.coding
+# - For.how.many.years.have.you.used.machine.learning.meth
+# ods..at.work.or.in.school..
+# - Do.you.consider.yourself.to.be.a.data.scientist.
+# - ML_atWork
+```
+
+```{r}
+# Gender
+levels(data$gender)
+data$gender <- factor(data$gender, ordered = FALSE)
+```
+```{r}
+# Age
+levels(data$age)
+data$age <- factor(
+  data$age,
+  levels = c(
+    "18-21", "22-24", "25-29", "30-34", "35-39", "40-44", "45-49", "50-54", "55-59", "60-69", "70-79", "80+"
+  ),
+  ordered = TRUE
+)
+```
+```{r}
+# Country
+levels(data$country)
+data$country <- factor(data$country, ordered = FALSE)
+```
+
+```{r}
+# Education
+levels(data$education)
+data$education <- factor(
+  data$education,
+  levels = c(
+    "Some college/university study without earning a bachelor’s degree",
+    "Bachelor’s degree",
+    "Master’s degree",
+    "Professional degree",
+    "Doctoral degree"
+  ),
+  ordered = TRUE
+)
+# Professional degree is hard to rank here. Maybe we should make this unordered.
+```
+```{r}
+# undergraduate_major
+levels(data$undergraduate_major)
+data$undergraduate_major <- factor(data$undergraduate_major, ordered = FALSE)
+```
+```{r}
+# job_role 
+levels(data$job_role)
+data$job_role <- factor(data$job_role, ordered = FALSE)
+```
+
+```{r}
+# industry
+levels(data$industry)
+data$industry <- factor(data$industry, ordered = FALSE)
+```
+```{r}
+# years_experience
+levels(data$years_experience)
+data$years_experience <- factor(
+  data$years_experience,
+  levels = c(
+    "0-1", "1-2", "2-3", "3-4", "4-5", "5-11", "11-15", "15-20", "20-25", "25-30", "30 +"
+  ),
+  ordered = TRUE
+)
+```
+```{r}
+# ML_atwork
+levels(data$ML_atwork)
+data$ML_atwork <- factor(
+  data$ML_atwork,
+  levels = c(
+    "I do not know",
+    "No (we do not use ML methods)",
+    "We are exploring ML methods (and may one day put a model into production)",
+    "We use ML methods for generating insights (but do not put working models into production)",
+    "We recently started using ML methods (i.e., models in production for less than 2 years)",
+    "We have well established ML methods (i.e., models in production for more than 2 years)"
+    ),
+    ordered = FALSE
+  )
+
+# We also wanted to order this variable, but we could not agree, as the ordering depends on the perspective taken.
+```
+```{r}
+# Programming_language_used_most_often
+levels(data$Programming_language_used_most_often)
+data$Programming_language_used_most_often <- factor(data$Programming_language_used_most_often, ordered = FALSE)
+```
+```{r}
+# percent_actively.coding
+levels(data$percent_actively.coding)
+data$percent_actively.coding <- factor(
+  data$percent_actively.coding,
+  levels = c(
+    "0% of my time", "1% to 25% of my time", "25% to 49% of my time", "50% to 74% of my time", "75% to 99% of my time", "100% of my time"
+  ),
+  ordered = TRUE
+)
+```
+```{r}
+# How.long.have.you.been.writing.code.to.analyze.data.
+levels(data$How.long.have.you.been.writing.code.to.analyze.data.)
+data$How.long.have.you.been.writing.code.to.analyze.data. <- factor(
+  data$How.long.have.you.been.writing.code.to.analyze.data.,
+  levels = c(
+    "I have never written code and I do not want to learn", 
+    "I have never written code but I want to learn", 
+    "< 1 year", 
+    "1-2 years", 
+    "3-5 years", 
+    "5-10 years", 
+    "10-20 years", 
+    "20-30 years", 
+    "30-40 years", 
+    "40+ years"
+  ),
+  ordered = TRUE
+)
+```
+```{r}
+# For.how.many.years.have.you.used.machine.learning.methods..at.work.or.in.school..
+levels(data$For.how.many.years.have.you.used.machine.learning.methods..at.work.or.in.school..)
+data$For.how.many.years.have.you.used.machine.learning.methods..at.work.or.in.school.. <- factor(
+  data$For.how.many.years.have.you.used.machine.learning.methods..at.work.or.in.school..,
+  levels = c(
+    "I have never studied machine learning and I do not plan to", 
+    "I have never studied machine learning but plan to learn in the future", 
+    "< 1 year", 
+    "1-2 years", 
+    "2-3 years", 
+    "3-4 years", 
+    "4-5 years", 
+    "5-10 years", 
+    "10-15 years", 
+    "15-20 years",
+    "20+ years"
+  ),
+  ordered = TRUE
+)
+```
+```{r}
+# Do.you.consider.yourself.to.be.a.data.scientist.
+levels(data$Do.you.consider.yourself.to.be.a.data.scientist.)
+data$Do.you.consider.yourself.to.be.a.data.scientist. <- factor(
+  data$Do.you.consider.yourself.to.be.a.data.scientist.,
+  levels = c(
+    "Definitely not", 
+    "Probably not",
+    "Maybe",
+    "Probably yes",
+    "Definitely yes"
+  ),
+  ordered = TRUE
+)
+```
+## Outliers
+```{r}
+# Just as a reminder if necessary
+```
+
+# Exploratory Data Analysis
+```{r}
+# Only if needed
+```
+
+# Data Preparation
+```{r}
+# General Feature Selection (Removing "Do you consider yourself to be a data scientist)
+# Log Wage
+# Removing Wage = 0 Values
+```
+
+# General Train Test Split
+```{r}
+split  <- initial_split(data, prop = 0.7)
+data_train  <- training(split)
+data_test   <- testing(split)
+
+hist(data_train$wage) # check the distribution of the target variable in train data
+hist(data_test$wage) # check the distribution of the target variable in test data
+```
+
+# Models
+
+## Linear Regression (Benchmark)
+```{r}
+linear_regression_model <- lm(wage ~ .,
+                                data= data_train)
+```
+
+```{r}
+# Print results of the model
+summary(linear_regression_model)
+```
+
+```{r}
+# Make predictions on the test data to evaluate your model's performance
+linear_regression_model_predictions <- linear_regression_model |> predict(data_test)
+```
+
+```{r}
+# Compute the prediction error, RMSE
+cat("RMSE (Linear Regression):", RMSE(linear_regression_model_predictions, data_test$wage))
+```
+```{r}
+linear_regression_model <- lm(wage ~ 
+                                age +
+                                country+
+                                job_role +
+                                industry +
+                                ML_atwork,
+                                data= data_train)
+```
+
+```{r}
+# Print results of the model
+summary(linear_regression_model)
+```
+
+```{r}
+# Make predictions on the test data to evaluate your model's performance
+linear_regression_model_predictions <- linear_regression_model |> predict(data_test)
+```
+
+```{r}
+# Compute the prediction error, RMSE
+cat("RMSE (Linear Regression):", RMSE(linear_regression_model_predictions, data_test$wage))
+```
+## Decision Tree
+```{r}
+
+```
+
+## Random Forest
+```{r}
+
+```
+
+## Gradient Boosting Models
+```{r}
+
+```
+
+## XG Boost
+```{r}
+
+```
+
+## Neural Network
+```{r}
+
+```
+
+# Model Comparison
+```{r}
+
+```
+
+# Final Model
+```{r}
+
+```
+
+# Our Wage Prediction
+```{r}
+
+```
+
