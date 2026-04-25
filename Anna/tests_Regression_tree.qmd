@@ -8,7 +8,6 @@ format: html
 ```{r}
 library(dlookr)
 library(rsample)
-library(caret)
 ```
 
 # Setup
@@ -325,23 +324,17 @@ data$Do.you.consider.yourself.to.be.a.data.scientist. <- factor(
 # Data Preparation
 
 ```{r}
-
 data_prepared <- data
-
 # General feature selection:
 # We remove "Do you consider yourself to be a data scientist?"
 data_prepared$Do.you.consider.yourself.to.be.a.data.scientist. <- NULL
-
 # Remove wage = 0 before creating the log outcome.
 data_prepared <- subset(data_prepared, wage > 0)
-
 # Log wage:
 # We keep the original wage column for interpretation,but create log_wage as the modelling target.
 data_prepared$log_wage <- log(data_prepared$wage)
-
 # Drop unused levels after filtering
 data_prepared <- droplevels(data_prepared)
-
 cat("Rows in prepared data:", nrow(data_prepared), "\n")
 cat("Columns in prepared data:", ncol(data_prepared), "\n")
 summary(data_prepared$log_wage)
@@ -350,7 +343,6 @@ summary(data_prepared$log_wage)
 # General Train Test Split
 
 ```{r}
-
 split  <- initial_split(data_prepared, prop = 0.7)
 data_train  <- training(split)
 data_test   <- testing(split)
@@ -374,7 +366,7 @@ summary(linear_regression_model)
 ```
 
 ```{r}
-# Make predictions on the test data to evaluate your model's performance
+# Make predictions on the test data to evaluate  model's performance
 linear_regression_model_predictions <- linear_regression_model |> predict(data_test)
 ```
 
@@ -395,12 +387,11 @@ linear_regression_model <- lm(log_wage ~
 ```
 
 ```{r}
-# Print results of the model
 summary(linear_regression_model)
 ```
 
 ```{r}
-# Make predictions on the test data to evaluate your model's performance
+# Make predictions on the test data to evaluate model's performance
 linear_regression_model_predictions <- linear_regression_model |> predict(data_test)
 ```
 
@@ -410,14 +401,13 @@ linear_regression_rmse <- sqrt(mean((linear_regression_model_predictions - data_
 cat("RMSE (Linear Regression, log_wage):", linear_regression_rmse)
 ```
 
-## Decision Tree
+## Regression Tree
 
 To keep the comparison fair, we use the same predictors that were already used in the reduced linear regression benchmark above: age + country + job_role + industry + ML_atwork.
 
 Regression-tree decisions:
 
 -   I used `method = "anova"` because the target variable `log_wage` is continuous, so this is a regression tree, not a classification tree.
--   I kept the same predictors as in your reduced linear regression model so the comparison stays fair and we do not change earlier feature-selection work.
 
 ```{r}
 tree_model <- rpart::rpart(
@@ -499,62 +489,74 @@ tree_model$variable.importance
 
 The regression tree suggests that wage differences are driven mainly by country, then by job role and age. This makes sense, because salaries differ strongly across countries, and then also by career position and experience-related factors.
 
-### Comparison: Regression Tree with `wage = 0` Included
+### Improved Regression Tree
+
+The first tree is only a basic implementation. So here we try a slightly deeper tree with a small positive complexity parameter to see if it predicts a bit better without becoming too complex.
 
 ```{r}
-# This keeps wage = 0 observations in the sample and uses raw wage as the target.
-set.seed(123)
-split_wage0 <- initial_split(data, prop = 0.7)
-data_train_wage0 <- training(split_wage0)
-data_test_wage0 <- testing(split_wage0)
-
-tree_model_wage0 <- rpart::rpart(
-  wage ~ age +
+tree_model_improved <- rpart::rpart(
+  log_wage ~ age +
     country +
     job_role +
     industry +
     ML_atwork,
-  data = data_train_wage0,
+  data = data_train,
   method = "anova",
-  control = rpart::rpart.control(cp = 0, maxdepth = 3)
+  control = rpart::rpart.control(cp = 0.001, maxdepth = 4)
 )
 ```
 
 ```{r}
-tree_predictions_wage0 <- predict(tree_model_wage0, data_test_wage0)
-tree_rmse_wage0 <- sqrt(mean((tree_predictions_wage0 - data_test_wage0$wage)^2))
+tree_predictions_improved <- predict(tree_model_improved, data_test)
+tree_rmse_improved <- sqrt(mean((tree_predictions_improved - data_test$log_wage)^2))
 
-cat("RMSE (Regression Tree, wage with 0 included):", tree_rmse_wage0)
+cat("RMSE (Improved Regression Tree, log_wage):", tree_rmse_improved)
 ```
 
+The RMSE is slightly lower than for the first tree, so this version seems to perform better on unseen data. This suggests that allowing a bit more structure helped the model capture wage differences better.
+
 ```{r}
-head(
-  data.frame(
-    actual_wage = data_test_wage0$wage,
-    predicted_wage = tree_predictions_wage0
+comparison_log_trees <- data.frame(
+  model = c("Baseline regression tree", "Improved regression tree"),
+  cp = c(0, 0.001),
+  maxdepth = c(3, 4),
+  rmse_log_wage = c(tree_rmse, tree_rmse_improved)
+)
+
+comparison_log_trees
+```
+
+This table makes the comparison easier to see on the same test data. Since the improved tree has the lower RMSE, I would keep this as the better tree version. The difference is not huge but it still performs better.
+
+```{r, fig.width=18, fig.height=10, out.width="100%"}
+if (requireNamespace("rpart.plot", quietly = TRUE)) {
+  rpart.plot::rpart.plot(
+    tree_model_improved,
+    type = 5,
+    cex = 0.6,
+    tweak = 0.8,
+    fallen.leaves = TRUE
   )
-)
+} else {
+  par(mar = c(2, 2, 2, 2), xpd = NA)
+  plot(
+    tree_model_improved,
+    uniform = TRUE,
+    compress = TRUE,
+    branch = 0.4,
+    margin = 0.05
+  )
+  text(
+    tree_model_improved,
+    use.n = TRUE,
+    all = TRUE,
+    cex = 0.45,
+    pretty = 1
+  )
+}
 ```
 
-```{r}
-tree_model_wage0$variable.importance
-```
-
-```{r}
-comparison_tree_models <- data.frame(
-  model = c(
-    "Regression Tree on log_wage (wage > 0)",
-    "Regression Tree on raw wage (wage = 0 included)"
-  ),
-  target = c("log_wage", "wage"),
-  zero_wage_rows_included = c("No", "Yes"),
-  rmse = c(tree_rmse, tree_rmse_wage0)
-)
-
-comparison_tree_models
-```
-
-So this comparison is mainly useful for showing how the earlier raw-wage version behaves versus the prepared-data version.
+The improved tree is still a bit crowded because some predictors have many levels. But it is still useful for seeing the overall split structure and how the model groups respondents.
 
 ## Random Forest
 
