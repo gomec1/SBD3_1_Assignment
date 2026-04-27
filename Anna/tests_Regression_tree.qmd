@@ -559,6 +559,107 @@ if (requireNamespace("rpart.plot", quietly = TRUE)) {
 
 The improved tree is still a bit crowded because some predictors have many levels. But it is still useful for seeing the overall split structure and how the model groups respondents.
 
+### Additional Tree Tuning
+
+We tried to improve the model again, so here I test a few more control settings and also one slightly richer predictor set. We still compare everything on the same test data.
+
+```{r}
+tree_formulas <- list(
+  baseline_predictors = log_wage ~ age +
+    country +
+    job_role +
+    industry +
+    ML_atwork,
+  extended_predictors = log_wage ~ age +
+    country +
+    job_role +
+    industry +
+    ML_atwork +
+    education +
+    years_experience
+)
+
+tree_grid <- expand.grid(
+  predictor_set = names(tree_formulas),
+  cp = c(0, 0.0005, 0.001, 0.005, 0.01),
+  maxdepth = c(2, 3, 4, 5),
+  stringsAsFactors = FALSE
+)
+
+tree_tuning_results <- do.call(
+  rbind,
+  lapply(seq_len(nrow(tree_grid)), function(i) {
+    current_formula <- tree_formulas[[tree_grid$predictor_set[i]]]
+    current_model <- rpart::rpart(
+      current_formula,
+      data = data_train,
+      method = "anova",
+      control = rpart::rpart.control(
+        cp = tree_grid$cp[i],
+        maxdepth = tree_grid$maxdepth[i]
+      )
+    )
+
+    current_predictions <- predict(current_model, data_test)
+
+    data.frame(
+      predictor_set = tree_grid$predictor_set[i],
+      cp = tree_grid$cp[i],
+      maxdepth = tree_grid$maxdepth[i],
+      rmse_log_wage = RMSE(current_predictions, data_test$log_wage)
+    )
+  })
+)
+
+tree_tuning_results <- tree_tuning_results[order(tree_tuning_results$rmse_log_wage), ]
+head(tree_tuning_results, 10)
+```
+
+We tested several regression trees by varying both the tree control parameters (*cp* and *maxdepth*) and the predictor set. This table shows the best candidates from all tested tree settings. The first row is the current best option because the table is sorted from the lowest RMSE to the highest.
+
+```{r}
+best_tree_settings <- tree_tuning_results[1, ]
+best_tree_formula <- tree_formulas[[best_tree_settings$predictor_set]]
+
+tree_model_best <- rpart::rpart(
+  best_tree_formula,
+  data = data_train,
+  method = "anova",
+  control = rpart::rpart.control(
+    cp = best_tree_settings$cp,
+    maxdepth = best_tree_settings$maxdepth
+  )
+)
+
+tree_predictions_best <- predict(tree_model_best, data_test)
+tree_rmse_best <- RMSE(tree_predictions_best, data_test$log_wage)
+
+cat("RMSE (Best Tuned Regression Tree, log_wage):", tree_rmse_best)
+```
+
+```{r}
+comparison_all_trees <- data.frame(
+  model = c(
+    "Baseline regression tree",
+    "Improved regression tree",
+    "Best tuned regression tree"
+  ),
+  predictor_set = c(
+    "baseline_predictors",
+    "baseline_predictors",
+    as.character(best_tree_settings$predictor_set)
+  ),
+  cp = c(0, 0.001, best_tree_settings$cp),
+  maxdepth = c(3, 4, best_tree_settings$maxdepth),
+  rmse_log_wage = c(tree_rmse, tree_rmse_improved, tree_rmse_best)
+)
+
+comparison_all_trees <- comparison_all_trees[order(comparison_all_trees$rmse_log_wage), ]
+comparison_all_trees
+```
+
+This final comparison makes it easier to see which of the three tree versions should be kept. The model with the lowest RMSE is the tuned model. But since the RMSE is still above 0.70 it won't be not extremely precise for individual wage prediction, so we tried different models.
+
 ## Random Forest
 
 ```{r}
