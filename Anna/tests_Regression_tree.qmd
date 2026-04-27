@@ -7,6 +7,7 @@ format: html
 
 ```{r}
 library(dlookr)
+library(caret)
 library(rsample)
 ```
 
@@ -372,7 +373,7 @@ linear_regression_model_predictions <- linear_regression_model |> predict(data_t
 
 ```{r}
 # Compute the prediction error, RMSE
-linear_regression_rmse <- sqrt(mean((linear_regression_model_predictions - data_test$log_wage)^2))
+linear_regression_rmse <- RMSE(linear_regression_model_predictions, data_test$log_wage)
 cat("RMSE (Linear Regression, log_wage):", linear_regression_rmse)
 ```
 
@@ -397,7 +398,7 @@ linear_regression_model_predictions <- linear_regression_model |> predict(data_t
 
 ```{r}
 # Compute the prediction error, RMSE
-linear_regression_rmse <- sqrt(mean((linear_regression_model_predictions - data_test$log_wage)^2))
+linear_regression_rmse <- RMSE(linear_regression_model_predictions, data_test$log_wage)
 cat("RMSE (Linear Regression, log_wage):", linear_regression_rmse)
 ```
 
@@ -461,7 +462,7 @@ The plot is useful for understanding the general structure of the tree, but it i
 ```{r}
 
 tree_predictions <- predict(tree_model, data_test)
-tree_rmse <- sqrt(mean((tree_predictions - data_test$log_wage)^2))
+tree_rmse <- RMSE(tree_predictions, data_test$log_wage)
 
 cat("RMSE (Regression Tree, log_wage):", tree_rmse)
 ```
@@ -508,7 +509,7 @@ tree_model_improved <- rpart::rpart(
 
 ```{r}
 tree_predictions_improved <- predict(tree_model_improved, data_test)
-tree_rmse_improved <- sqrt(mean((tree_predictions_improved - data_test$log_wage)^2))
+tree_rmse_improved <- RMSE(tree_predictions_improved, data_test$log_wage)
 
 cat("RMSE (Improved Regression Tree, log_wage):", tree_rmse_improved)
 ```
