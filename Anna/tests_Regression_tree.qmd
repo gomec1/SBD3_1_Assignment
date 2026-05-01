@@ -404,19 +404,23 @@ cat("RMSE (Linear Regression, log_wage):", linear_regression_rmse)
 
 ## Regression Tree
 
-To keep the comparison fair, we use the same predictors that were already used in the reduced linear regression benchmark above: age + country + job_role + industry + ML_atwork.
+We start with regression tree using settings: `cp = 0` and `maxdepth = 3`.
+
+For the predictors, we follow the AutoML approach (`AutoML.qmd`) and let the tree consider all available features (`log_wage ~ . - wage`). Regression trees are robust to irrelevant variables so there is no need for manual pre-selection. The variable importance output later in this section will reveal which features the tree actually relied on, which we cross-check against the labor economics literature (education, experience, country, and occupation).
 
 Regression-tree decisions:
 
--   I used `method = "anova"` because the target variable `log_wage` is continuous, so this is a regression tree, not a classification tree.
+-   We use `method = "anova"` because the target variable `log_wage` is continuous, so this is a regression tree, not a classification tree.
+
+```{r}
+# Shared formula reused for all regression trees in this section.
+# We use all available features (excluding the raw wage, since log_wage is the target).
+tree_formula <- log_wage ~ . - wage
+```
 
 ```{r}
 tree_model <- rpart::rpart(
-  log_wage ~ age +
-    country +
-    job_role +
-    industry +
-    ML_atwork,
+  tree_formula,
   data = data_train,
   method = "anova",
   control = rpart::rpart.control(cp = 0, maxdepth = 3)
@@ -460,14 +464,17 @@ if (requireNamespace("rpart.plot", quietly = TRUE)) {
 The plot is useful for understanding the general structure of the tree, but it is too crowded to read every category label clearly because variables like country and job_role have many levels.
 
 ```{r}
+tree_predictions         <- predict(tree_model, data_test)
+tree_predictions_dollars <- exp(tree_predictions)
 
-tree_predictions <- predict(tree_model, data_test)
-tree_rmse <- RMSE(tree_predictions, data_test$log_wage)
+tree_rmse_log     <- RMSE(tree_predictions,         data_test$log_wage)
+tree_rmse_dollars <- RMSE(tree_predictions_dollars, data_test$wage)
 
-cat("RMSE (Regression Tree, log_wage):", tree_rmse)
+cat("RMSE (Regression Tree, log_wage):", tree_rmse_log, "\n")
+cat("RMSE (Regression Tree, $USD)    :", tree_rmse_dollars, "\n")
 ```
 
-The tree on log_wage is more appropriate for this dataset because wages are very skewed, and the log transformation makes the target easier to model.an error of about 0.79 in logs means the model can often be off by roughly a factor of about 2, so it is interpretable, but not super precise.
+The tree on log_wage is more appropriate for this dataset because wages are very skewed, and the log transformation makes the target easier to model. An error of about 0.79 in logs means the model can often be off by roughly a factor of about 2, so it is interpretable but not very precise. The dollar-scale RMSE shows the typical prediction error in actual USD, which is easier to communicate to a non-technical audience.
 
 ```{r}
 
@@ -481,58 +488,80 @@ head(
 )
 ```
 
-Because this is a regression tree, several observations can receive the same prediction. the tree does reasonably well for some middle-range cases but it struggles more at the extremes, especially very low and very high wages and it also tends to pull predictions toward group averages.
+Because this is a regression tree, several observations can receive the same prediction. The tree does reasonably well for some middle-range cases but it struggles more at the extremes, especially very low and very high wages, and it also tends to pull predictions toward group averages.
 
 ```{r}
 # Variable importance from the fitted regression tree.
 tree_model$variable.importance
 ```
 
-The regression tree suggests that wage differences are driven mainly by country, then by job role and age. This makes sense, because salaries differ strongly across countries, and then also by career position and experience-related factors.
+These values reflect the total reduction in residual variance attributable to each variable across all splits in the tree, including surrogate splits. Higher values mean the variable contributed more to reducing prediction error. The regression tree suggests that wage differences are driven mainly by country, then by job role and age. This makes sense, because salaries differ strongly across countries and then also by career position and experience-related factors.
 
-### Improved Regression Tree
+### Under/overfitting tests
 
-The first tree is only a basic implementation. So here we try a slightly deeper tree with a small positive complexity parameter to see if it predicts a bit better without becoming too complex.
+The baseline tree above is the simple implementation. Typically very shallow trees underfit, while very deep trees with `cp` close to zero risk overfitting. Because of that we test three explicit configurations on the same test set to find a sensible balance, instead of mechanically picking the lowest-RMSE setting from a large grid.
 
 ```{r}
-tree_model_improved <- rpart::rpart(
-  log_wage ~ age +
-    country +
-    job_role +
-    industry +
-    ML_atwork,
+# Shallow tree — likely underfits
+tree_shallow <- rpart::rpart(
+  tree_formula,
+  data = data_train,
+  method = "anova",
+  control = rpart::rpart.control(cp = 0, maxdepth = 2)
+)
+
+# Moderate tree — slightly deeper with a small cp
+tree_moderate <- rpart::rpart(
+  tree_formula,
   data = data_train,
   method = "anova",
   control = rpart::rpart.control(cp = 0.001, maxdepth = 4)
 )
+
+# Deep tree — risk of overfitting
+tree_deep <- rpart::rpart(
+  tree_formula,
+  data = data_train,
+  method = "anova",
+  control = rpart::rpart.control(cp = 0.0005, maxdepth = 5)
+)
 ```
 
 ```{r}
-tree_predictions_improved <- predict(tree_model_improved, data_test)
-tree_rmse_improved <- RMSE(tree_predictions_improved, data_test$log_wage)
+tree_rmse_summary <- function(model, test_data) {
+  preds_log     <- predict(model, test_data)
+  preds_dollars <- exp(preds_log)
+  data.frame(
+    rmse_log_wage = RMSE(preds_log,     test_data$log_wage),
+    rmse_dollars  = RMSE(preds_dollars, test_data$wage)
+  )
+}
 
-cat("RMSE (Improved Regression Tree, log_wage):", tree_rmse_improved)
-```
-
-The RMSE is slightly lower than for the first tree, so this version seems to perform better on unseen data. This suggests that allowing a bit more structure helped the model capture wage differences better.
-
-```{r}
-comparison_log_trees <- data.frame(
-  model = c("Baseline regression tree", "Improved regression tree"),
-  cp = c(0, 0.001),
-  maxdepth = c(3, 4),
-  rmse_log_wage = c(tree_rmse, tree_rmse_improved)
+tree_comparison <- rbind(
+  cbind(model = "Baseline (class style: cp=0, d=3)", tree_rmse_summary(tree_model,    data_test)),
+  cbind(model = "Shallow  (cp=0, d=2)",              tree_rmse_summary(tree_shallow,  data_test)),
+  cbind(model = "Moderate (cp=0.001, d=4)",          tree_rmse_summary(tree_moderate, data_test)),
+  cbind(model = "Deep     (cp=0.0005, d=5)",         tree_rmse_summary(tree_deep,     data_test))
 )
 
-comparison_log_trees
+tree_comparison
 ```
 
-This table makes the comparison easier to see on the same test data. Since the improved tree has the lower RMSE, I would keep this as the better tree version. The difference is not huge but it still performs better.
+The shallow tree has the highest RMSE so there are too many splits to capture wage differences (underfitting). The deeper trees lower RMSE further, but the gain shrinks as we move from moderate to deep, which shows diminishing returns and a growing overfitting risk. We pick the moderate tree (`cp = 0.001`, `maxdepth = 4`) as the final regression tree because it improves clearly over the baseline without going as deep as the maximum-complexity option.
+
+```{r}
+tree_final                     <- tree_moderate
+tree_final_predictions         <- predict(tree_final, data_test)
+tree_final_predictions_dollars <- exp(tree_final_predictions)
+
+cat("Final tree RMSE (log_wage):", RMSE(tree_final_predictions,         data_test$log_wage), "\n")
+cat("Final tree RMSE ($USD)    :", RMSE(tree_final_predictions_dollars, data_test$wage), "\n")
+```
 
 ```{r, fig.width=18, fig.height=10, out.width="100%"}
 if (requireNamespace("rpart.plot", quietly = TRUE)) {
   rpart.plot::rpart.plot(
-    tree_model_improved,
+    tree_final,
     type = 5,
     cex = 0.6,
     tweak = 0.8,
@@ -541,14 +570,14 @@ if (requireNamespace("rpart.plot", quietly = TRUE)) {
 } else {
   par(mar = c(2, 2, 2, 2), xpd = NA)
   plot(
-    tree_model_improved,
+    tree_final,
     uniform = TRUE,
     compress = TRUE,
     branch = 0.4,
     margin = 0.05
   )
   text(
-    tree_model_improved,
+    tree_final,
     use.n = TRUE,
     all = TRUE,
     cex = 0.45,
@@ -557,108 +586,39 @@ if (requireNamespace("rpart.plot", quietly = TRUE)) {
 }
 ```
 
-The improved tree is still a bit crowded because some predictors have many levels. But it is still useful for seeing the overall split structure and how the model groups respondents.
+The final tree is still a bit crowded because some predictors have many levels, but the overall structure shows how the model groups respondents. Since the RMSE is still above 0.70 in log units (and on the order of tens of thousands of USD), single tree underperforms LR even with all features, which means we need to try more flexible models next.
 
-### Additional Tree Tuning
+### Feature set comparison: all features vs. 7 hand-picked features
 
-We tried to improve the model again, so here I test a few more control settings and also one slightly richer predictor set. We still compare everything on the same test data.
-
-```{r}
-tree_formulas <- list(
-  baseline_predictors = log_wage ~ age +
-    country +
-    job_role +
-    industry +
-    ML_atwork,
-  extended_predictors = log_wage ~ age +
-    country +
-    job_role +
-    industry +
-    ML_atwork +
-    education +
-    years_experience
-)
-
-tree_grid <- expand.grid(
-  predictor_set = names(tree_formulas),
-  cp = c(0, 0.0005, 0.001, 0.005, 0.01),
-  maxdepth = c(2, 3, 4, 5),
-  stringsAsFactors = FALSE
-)
-
-tree_tuning_results <- do.call(
-  rbind,
-  lapply(seq_len(nrow(tree_grid)), function(i) {
-    current_formula <- tree_formulas[[tree_grid$predictor_set[i]]]
-    current_model <- rpart::rpart(
-      current_formula,
-      data = data_train,
-      method = "anova",
-      control = rpart::rpart.control(
-        cp = tree_grid$cp[i],
-        maxdepth = tree_grid$maxdepth[i]
-      )
-    )
-
-    current_predictions <- predict(current_model, data_test)
-
-    data.frame(
-      predictor_set = tree_grid$predictor_set[i],
-      cp = tree_grid$cp[i],
-      maxdepth = tree_grid$maxdepth[i],
-      rmse_log_wage = RMSE(current_predictions, data_test$log_wage)
-    )
-  })
-)
-
-tree_tuning_results <- tree_tuning_results[order(tree_tuning_results$rmse_log_wage), ]
-head(tree_tuning_results, 10)
-```
-
-We tested several regression trees by varying both the tree control parameters (*cp* and *maxdepth*) and the predictor set. This table shows the best candidates from all tested tree settings. The first row is the current best option because the table is sorted from the lowest RMSE to the highest.
+So far we used `log_wage ~ . - wage`. For comparison, we also fit the same regression tree on a smaller, more domain-justified set of 7 predictors taken from the labor economics literature: age, country, job_role, industry, ML_atwork, education, and years_experience.
 
 ```{r}
-best_tree_settings <- tree_tuning_results[1, ]
-best_tree_formula <- tree_formulas[[best_tree_settings$predictor_set]]
+tree_formula_7 <- log_wage ~ age +
+  country +
+  job_role +
+  industry +
+  ML_atwork +
+  education +
+  years_experience
 
-tree_model_best <- rpart::rpart(
-  best_tree_formula,
+tree_7features <- rpart::rpart(
+  tree_formula_7,
   data = data_train,
   method = "anova",
-  control = rpart::rpart.control(
-    cp = best_tree_settings$cp,
-    maxdepth = best_tree_settings$maxdepth
-  )
+  control = rpart::rpart.control(cp = 0.001, maxdepth = 4)
 )
-
-tree_predictions_best <- predict(tree_model_best, data_test)
-tree_rmse_best <- RMSE(tree_predictions_best, data_test$log_wage)
-
-cat("RMSE (Best Tuned Regression Tree, log_wage):", tree_rmse_best)
 ```
 
 ```{r}
-comparison_all_trees <- data.frame(
-  model = c(
-    "Baseline regression tree",
-    "Improved regression tree",
-    "Best tuned regression tree"
-  ),
-  predictor_set = c(
-    "baseline_predictors",
-    "baseline_predictors",
-    as.character(best_tree_settings$predictor_set)
-  ),
-  cp = c(0, 0.001, best_tree_settings$cp),
-  maxdepth = c(3, 4, best_tree_settings$maxdepth),
-  rmse_log_wage = c(tree_rmse, tree_rmse_improved, tree_rmse_best)
+feature_set_comparison <- rbind(
+  cbind(feature_set = "All features (log_wage ~ . - wage)", tree_rmse_summary(tree_final,    data_test)),
+  cbind(feature_set = "7 hand-picked features (Mincer)",    tree_rmse_summary(tree_7features, data_test))
 )
 
-comparison_all_trees <- comparison_all_trees[order(comparison_all_trees$rmse_log_wage), ]
-comparison_all_trees
+feature_set_comparison
 ```
 
-This final comparison makes it easier to see which of the three tree versions should be kept. The model with the lowest RMSE is the tuned model. But since the RMSE is still above 0.70 it won't be not extremely precise for individual wage prediction, so we tried different models.
+The two specifications produce very similar test RMSE, and the smaller 7-feature set is slightly better. Model still underperforms so we decide to try random forest next considering all the features we have in this dataset.
 
 ## Random Forest
 
