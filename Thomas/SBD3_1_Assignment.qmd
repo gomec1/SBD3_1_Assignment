@@ -7,35 +7,27 @@ format: html
 library(dlookr)
 library(rsample)
 library(caret)
-library(forcats)
-library(corrplot)
-
-library(rpart)
-library(rpart.plot)
-
-library(randomForest)
-
-library(gbm)
-
-library(xgboost)
 ```
 
 # Setup
 ```{r}
-rm(list=ls())
+# rm(list=ls())
 options(scipen=999)
+getwd()
 set.seed(123)
 ```
 
 # Loading Data
 ```{r}
-load("data_wage.RData")
+load("../01_Submit/data_wage.RData")
 head(data)
 ```
 
 # Data Checks
 ```{r}
 summary(data)
+levels(data$education)
+levels(data$years_experience)
 ```
 
 ```{r}
@@ -136,10 +128,12 @@ print(is.ordered(data$gender))
 ```{r}
 # The following (factor) variables were treated as ordered:
 # - Age
+# - education
 # - years_experience
 # - How.long.have.you.been.writing.code.to.analyze.data.
 # - percent_actively.coding
-# - For.how.many.years.have.you.used.machine.learning.methods..at.work.or.in.school..
+# - For.how.many.years.have.you.used.machine.learning.meth
+# ods..at.work.or.in.school..
 # - Do.you.consider.yourself.to.be.a.data.scientist.
 # - ML_atWork
 ```
@@ -164,6 +158,7 @@ data$age <- factor(
 # Country
 levels(data$country)
 data$country <- factor(data$country, ordered = FALSE)
+table(data$country)
 ```
 
 ```{r}
@@ -306,22 +301,13 @@ data$Do.you.consider.yourself.to.be.a.data.scientist. <- factor(
 ```
 
 # Exploratory Data Analysis
-## Variable Correlation
+## Correlation
 ```{r}
-# Select numeric variables
-num_data <- data[, sapply(data, is.numeric)]
+# Correlation Matrix for numeric variables
+cor_matrix <- cor(data[, sapply(data, is.numeric)])  
 
-# Correlation matrix between variables
-cor_matrix <- cor(num_data)
-
-# Plot
-corrplot(
-  cor_matrix,
-  method = "color",
-  type = "upper",
-  tl.pos = "n",
-  main = "Correlation Matrix of Numeric Variabels"
-)
+# Correlation Matrix Plot
+corrplot(cor_matrix, method = "color", tl.pos = 'n')
 ```
 ```{r}
 # Higher correlations only (Threshold: > 0.5 or < -0.5)
@@ -341,30 +327,7 @@ high_corr <- high_corr[
   order(-abs(high_corr$Correlation)),
 ]
 
-head(high_corr, 20)
-```
-## Target Correlation
-```{r}
-# Correlation of all numeric variables with wage
-cor_target <- cor(num_data, use = "complete.obs")[, "wage"]
-
-# Remove wage itself
-cor_target <- cor_target[names(cor_target) != "wage"]
-
-# Convert to dataframe
-cor_target_df <- data.frame(
-  Variable = names(cor_target),
-  Correlation = cor_target
-)
-
-# Sort by absolute correlation
-cor_target_df <- cor_target_df[
-  order(-abs(cor_target_df$Correlation)),
-]
-
-rownames(cor_target_df) <- NULL
-
-head(cor_target_df, 20)
+print(high_corr)
 ```
 
 # Data Preparation
@@ -394,8 +357,8 @@ train_all <- data_train
 test_all  <- data_test
 
 # Version B: remove wage = 0
-train_pos <- train_all[train_all$wage > 0, ]
-test_pos  <- test_all[test_all$wage > 0, ]
+train_pos <- train_full[train_full$wage > 0, ]
+test_pos  <- test_full[test_full$wage > 0, ]
 
 # Version C: log wage, based on positive wages only
 train_log <- train_pos
@@ -416,6 +379,7 @@ hist(test_pos$wage)
 hist(train_log$wage)
 hist(test_log$wage)
 ```
+
 
 # Models
 
@@ -466,6 +430,10 @@ results_lm <- data.frame(
 results_lm
 ```
 ## Decision Tree
+```{r}
+library(rpart)
+library(rpart.plot)
+```
 ```{r}
 # Model 1: wage (all)
 set.seed(123)
@@ -524,12 +492,15 @@ results_tree
 
 ## Random Forest
 ```{r}
+library(randomForest)
+```
+```{r}
 # Model 1: wage (all)
 set.seed(123)
 rf_all <- randomForest(
   wage ~ .,
   data = train_all,
-  ntree = 1000,
+  ntree = 300,
   importance = TRUE
 )
 
@@ -538,7 +509,7 @@ set.seed(123)
 rf_pos <- randomForest(
   wage ~ .,
   data = train_pos,
-  ntree = 1000,
+  ntree = 300,
   importance = TRUE
 )
 
@@ -547,7 +518,7 @@ set.seed(123)
 rf_log <- randomForest(
   log_wage ~ . - wage,
   data = train_log,
-  ntree = 1000,
+  ntree = 300,
   importance = TRUE
 )
 ```
@@ -638,13 +609,16 @@ barplot(
 
 ## Gradient Boosting Models
 ```{r}
+library(gbm)
+```
+```{r}
 # Model 1: wage (all)
 set.seed(123)
 gbm_all <- gbm(
   formula = wage ~ .,
   data = train_all,
   distribution = "gaussian",
-  n.trees = 1000,
+  n.trees = 300,
   interaction.depth = 4,
   shrinkage = 0.03,
   verbose = FALSE
@@ -656,7 +630,7 @@ gbm_pos <- gbm(
   wage ~ .,
   data = train_pos,
   distribution = "gaussian",
-  n.trees = 1000,
+  n.trees = 300,
   interaction.depth = 4,
   shrinkage = 0.03,
   verbose = FALSE
@@ -668,7 +642,7 @@ gbm_log <- gbm(
   log_wage ~ . - wage,
   data = train_log,
   distribution = "gaussian",
-  n.trees = 1000,
+  n.trees = 300,
   interaction.depth = 4,
   shrinkage = 0.03,
   verbose = FALSE
@@ -677,11 +651,11 @@ gbm_log <- gbm(
 
 
 ```{r}
-pred_gbm_all <- predict(gbm_all, test_all, n.trees = 1000)
+pred_gbm_all <- predict(gbm_all, test_all, n.trees = 300)
 
-pred_gbm_pos <- predict(gbm_pos, test_pos, n.trees = 1000)
+pred_gbm_pos <- predict(gbm_pos, test_pos, n.trees = 300)
 
-pred_gbm_log <- predict(gbm_log, test_log, n.trees = 1000)
+pred_gbm_log <- predict(gbm_log, test_log, n.trees = 300)
 pred_gbm_log_wage <- exp(pred_gbm_log)
 ```
 
@@ -708,12 +682,11 @@ results_gbm <- data.frame(
 
 results_gbm
 ```
-```{r}
-summary(gbm_all)
-```
-
 
 ## XG Boost
+```{r}
+library(xgboost)
+```
 ```{r}
 train_xgb_model <- function(train_data, test_data, target, log_model = FALSE) {
   
@@ -735,7 +708,7 @@ train_xgb_model <- function(train_data, test_data, target, log_model = FALSE) {
     data = x_train,
     label = y_train,
     objective = "reg:squarederror",
-    nrounds = 1000,
+    nrounds = 300,
     max_depth = 4,
     eta = 0.05,
     subsample = 0.8,
@@ -810,6 +783,11 @@ importance_xgb <- xgb.importance(
 xgb.plot.importance(importance_xgb, top_n = 20)
 ```
 
+## Neural Network
+```{r}
+
+```
+
 # Model Comparison
 ```{r}
 results_all <- rbind(
@@ -825,92 +803,72 @@ results_all[order(results_all$MAE), ]
 results_all[order(-results_all$R2), ]
 ```
 
+# H20
+## AutoML
+```{r}
+# Installing & initializing H20. In case you have past installations, you should run 
+# lines 37-45. If this is the first time installing, you can only run lines 46-47.
+if ("package:h2o" %in% search()) { detach("package:h2o", unload=TRUE) }
+if ("h2o" %in% rownames(installed.packages())) { remove.packages("h2o") }
+pkgs <- c("RCurl","jsonlite")
+for (pkg in pkgs) {
+  if (! (pkg %in% rownames(installed.packages()))) { install.packages(pkg) }
+}
+install.packages("h2o", type="source", repos=(c("http://h2o-release.s3.amazonaws.com/h2o/latest_stable_R")))
+library(h2o)
+```
+```{r}
+# Call other necessary libraries 
+library(data.table)
+library(writexl)
+library(readr)
+```
+```{r, message=FALSE, warning=FALSE}
+# Initialize H2O cluster
+h2o.init()
+h2o.no_progress()
+```
+```{r}
+# Set the dataframe as h2o environment 
+df <- as.h2o(data_clean)
+```
+```{r}
+# Split dataset into training and validation sets
+set.seed(12)
+splits <- h2o.splitFrame(df, ratios = c(0.8))
+train <- splits[[1]]
+valid <- splits[[2]]
+```
+```{r}
+# Set the dependent variable 
+dep_var <- "wage"
+```
+```{r}
+automl <- h2o.automl(
+  x = setdiff(colnames(df), dep_var), # independent variables
+  y = dep_var, # dependent variable
+  training_frame = train,
+  max_runtime_secs = 600, # maximum time in seconds for AutoML to run
+  seed = 12 # set seed for reproducibility
+)
+```
+```{r,message=FALSE, warning=FALSE }
+# View leaderboard of models generated by AutoML
+lb <- automl@leaderboard
+lb_table <- as.data.frame(lb)
+
+knitr::kable(lb_table)
+
+```
+
+
 # Final Model
 ```{r}
-# Model Final: wage (all)
-set.seed(123)
-rf_final <- randomForest(
-  wage ~ .,
-  data = train_all,
-  ntree = 1000,
-  importance = TRUE
-)
-```
-```{r}
-pred_rf_final <- predict(rf_final, newdata = test_all)
-```
-```{r}
-results_rf_final <- data.frame(
-  Model = c("RF Final - wage (all)"),
-  RMSE = c(
-    RMSE(pred_rf_final, test_all$wage)
-  ),
-  MAE = c(
-    MAE(pred_rf_final, test_all$wage)
-  ),
-  R2 = c(
-    R2(pred_rf_final, test_all$wage)
-  )
-)
 
-results_rf_final
-```
-```{r}
-importance(rf_final)
-varImpPlot(
-  rf_final,
-  n.var = 15,
-  cex = 0.7,
-  main = "Top 15 Important Variables"
-)
 ```
 
 # Our Wage Prediction
-
-## Data
-
-### Anna
 ```{r}
-anna <- get(load("anna.RData"))
-head(anna)
+
 ```
 
-### Carlos
-```{r}
-carlos <- get(load("carlos.RData"))
-head(carlos)
-```
-
-### Thomas
-```{r}
-thomas <- get(load("thomas.RData"))
-head(thomas)
-```
-
-## Prediction
-
-### Anna
-```{r}
-pred_anna = predict(rf_final, newdata = anna)
-pred_anna
-```
-### Carlos
-```{r}
-pred_carlos = predict(rf_final, newdata = carlos)
-pred_carlos
-```
-### Thomas
-```{r}
-pred_thomas = predict(rf_final, newdata = thomas)
-pred_thomas
-```
-
-## Results
-```{r}
-final_predictions <- data.frame(
-  Person = c("Anna", "Carlos", "Thomas"),
-  Predicted_Wage_USD = round(c(pred_anna, pred_carlos, pred_thomas), 0)
-)
-
-final_predictions
-```
