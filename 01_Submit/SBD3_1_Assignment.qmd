@@ -6,6 +6,9 @@ format: html
 ```{r}
 library(dlookr)
 library(rsample)
+library(caret)
+library(forcats)
+library(corrplot)
 ```
 
 # Setup
@@ -125,12 +128,10 @@ print(is.ordered(data$gender))
 ```{r}
 # The following (factor) variables were treated as ordered:
 # - Age
-# - education
 # - years_experience
 # - How.long.have.you.been.writing.code.to.analyze.data.
 # - percent_actively.coding
-# - For.how.many.years.have.you.used.machine.learning.meth
-# ods..at.work.or.in.school..
+# - For.how.many.years.have.you.used.machine.learning.methods..at.work.or.in.school..
 # - Do.you.consider.yourself.to.be.a.data.scientist.
 # - ML_atWork
 ```
@@ -163,13 +164,14 @@ levels(data$education)
 data$education <- factor(
   data$education,
   levels = c(
+    "I prefer not to answer",
     "Some college/university study without earning a bachelor’s degree",
     "Bachelor’s degree",
     "Master’s degree",
     "Professional degree",
     "Doctoral degree"
   ),
-  ordered = TRUE
+  ordered = FALSE
 )
 # Professional degree is hard to rank here. Maybe we should make this unordered.
 ```
@@ -296,25 +298,115 @@ data$Do.you.consider.yourself.to.be.a.data.scientist. <- factor(
 ```
 
 # Exploratory Data Analysis
+## Variable Correlation
 ```{r}
-# Only if needed
+# Select numeric variables
+num_data <- data[, sapply(data, is.numeric)]
+
+# Correlation matrix between variables
+cor_matrix <- cor(num_data)
+
+# Plot
+corrplot(
+  cor_matrix,
+  method = "color",
+  type = "upper",
+  tl.pos = "n",
+  main = "Correlation Matrix of Numeric Variabels"
+)
+```
+```{r}
+# Higher correlations only (Threshold: > 0.5 or < -0.5)
+high_corr <- which(
+  abs(cor_matrix) > 0.5 &
+  upper.tri(cor_matrix),
+  arr.ind = TRUE
+)
+
+high_corr <- data.frame(
+  Var1 = rownames(cor_matrix)[high_corr[,1]],
+  Var2 = colnames(cor_matrix)[high_corr[,2]],
+  Correlation = cor_matrix[high_corr]
+)
+
+high_corr <- high_corr[
+  order(-abs(high_corr$Correlation)),
+]
+
+head(high_corr, 20)
+```
+## Target Correlation
+```{r}
+# Correlation of all numeric variables with wage
+cor_target <- cor(num_data, use = "complete.obs")[, "wage"]
+
+# Remove wage itself
+cor_target <- cor_target[names(cor_target) != "wage"]
+
+# Convert to dataframe
+cor_target_df <- data.frame(
+  Variable = names(cor_target),
+  Correlation = cor_target
+)
+
+# Sort by absolute correlation
+cor_target_df <- cor_target_df[
+  order(-abs(cor_target_df$Correlation)),
+]
+
+rownames(cor_target_df) <- NULL
+
+head(cor_target_df, 20)
 ```
 
 # Data Preparation
 ```{r}
-# General Feature Selection (Removing "Do you consider yourself to be a data scientist)
-# Log Wage
-# Removing Wage = 0 Values
+data_clean <- data
+
+# Reducing the amount of levels in the country variable by lumping together the least frequent ones into "Other".
+# This is for Tree Models that can not handle more than 53 levels in factors.
+# We keep the top 52 countries(52 + Other = 53)
+data_clean$country <- fct_lump(data_clean$country, n = 52)
+
+# Removing subjective variable
+data_clean$Do.you.consider.yourself.to.be.a.data.scientist. <- NULL
 ```
 
 # General Train Test Split
 ```{r}
-split  <- initial_split(data, prop = 0.7)
-data_train  <- training(split)
-data_test   <- testing(split)
+#Split the Data
+split <- initial_split(data_clean, prop = 0.7)
 
-hist(data_train$wage) # check the distribution of the target variable in train data
-hist(data_test$wage) # check the distribution of the target variable in test data
+data_train <- training(split)
+data_test  <- testing(split)
+
+# Different Data sets to use and compare
+# Version A: keep wage = 0
+train_all <- data_train
+test_all  <- data_test
+
+# Version B: remove wage = 0
+train_pos <- train_full[train_full$wage > 0, ]
+test_pos  <- test_full[test_full$wage > 0, ]
+
+# Version C: log wage, based on positive wages only
+train_log <- train_pos
+test_log  <- test_pos
+train_log$log_wage <- log(train_log$wage)
+test_log$log_wage  <- log(test_log$wage)
+
+# Check the distribution in the Target Variable for all 3 Datasets
+# Version A:
+hist(train_all$wage) 
+hist(test_all$wage) 
+
+# Version B:
+hist(train_pos$wage)
+hist(test_pos$wage)
+
+# Version C:
+hist(train_log$wage)
+hist(test_log$wage)
 ```
 
 # Models
