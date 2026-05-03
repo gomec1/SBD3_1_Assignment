@@ -413,66 +413,402 @@ hist(test_log$wage)
 
 ## Linear Regression (Benchmark)
 ```{r}
-linear_regression_model <- lm(wage ~ .,
-                                data= data_train)
+# Model 1: wage (all)
+set.seed(123)
+lm_all <- lm(wage ~ ., data = train_all)
+
+# Model 2: wage (no zeros)
+set.seed(123)
+lm_pos <- lm(wage ~ ., data = train_pos)
+
+# Model 3: log(wage)
+set.seed(123)
+lm_log <- lm(log_wage ~ . - wage, data = train_log)
+```
+```{r}
+# Predictions
+pred_all <- predict(lm_all, newdata = test_all)
+
+pred_pos <- predict(lm_pos, newdata = test_pos)
+
+pred_log <- predict(lm_log, newdata = test_log)
+pred_log_wage <- exp(pred_log)  # back-transform
 ```
 
 ```{r}
-# Print results of the model
-summary(linear_regression_model)
-```
+results_lm <- data.frame(
+  Model = c("LM - wage (all)", "LM - wage (no zeros)", "LM - log(wage)"),
+  RMSE = c(
+    RMSE(pred_all, test_all$wage),
+    RMSE(pred_pos, test_pos$wage),
+    RMSE(pred_log_wage, test_pos$wage)
+  ),
+  MAE = c(
+    MAE(pred_all, test_all$wage),
+    MAE(pred_pos, test_pos$wage),
+    MAE(pred_log_wage, test_pos$wage)
+  ),
+  R2 = c(
+    R2(pred_all, test_all$wage),
+    R2(pred_pos, test_pos$wage),
+    R2(pred_log_wage, test_pos$wage)
+  )
+)
 
-```{r}
-# Make predictions on the test data to evaluate your model's performance
-linear_regression_model_predictions <- linear_regression_model |> predict(data_test)
-```
-
-```{r}
-# Compute the prediction error, RMSE
-cat("RMSE (Linear Regression):", RMSE(linear_regression_model_predictions, data_test$wage))
-```
-```{r}
-linear_regression_model <- lm(wage ~ 
-                                age +
-                                country+
-                                job_role +
-                                industry +
-                                ML_atwork,
-                                data= data_train)
-```
-
-```{r}
-# Print results of the model
-summary(linear_regression_model)
-```
-
-```{r}
-# Make predictions on the test data to evaluate your model's performance
-linear_regression_model_predictions <- linear_regression_model |> predict(data_test)
-```
-
-```{r}
-# Compute the prediction error, RMSE
-cat("RMSE (Linear Regression):", RMSE(linear_regression_model_predictions, data_test$wage))
+results_lm
 ```
 ## Decision Tree
 ```{r}
+library(rpart)
+library(rpart.plot)
+```
+```{r}
+# Model 1: wage (all)
+set.seed(123)
+tree_all <- rpart(
+  wage ~ .,
+  data = train_all,
+  method = "anova"
+)
 
+# Model 2: wage (no zeros)
+set.seed(123)
+tree_pos <- rpart(
+  wage ~ .,
+  data = train_pos,
+  method = "anova"
+)
+
+# Model 3: log(wage)
+set.seed(123)
+tree_log <- rpart(
+  log_wage ~ . - wage,
+  data = train_log,
+  method = "anova"
+)
+```
+```{r}
+pred_tree_all <- predict(tree_all, newdata = test_all)
+
+pred_tree_pos <- predict(tree_pos, newdata = test_pos)
+
+pred_tree_log <- predict(tree_log, newdata = test_log)
+pred_tree_log_wage <- exp(pred_tree_log)
+```
+```{r}
+results_tree <- data.frame(
+  Model = c("Tree - wage (all)", "Tree - wage (no zeros)", "Tree - log(wage)"),
+  RMSE = c(
+    RMSE(pred_tree_all, test_all$wage),
+    RMSE(pred_tree_pos, test_pos$wage),
+    RMSE(pred_tree_log_wage, test_pos$wage)
+  ),
+  MAE = c(
+    MAE(pred_tree_all, test_all$wage),
+    MAE(pred_tree_pos, test_pos$wage),
+    MAE(pred_tree_log_wage, test_pos$wage)
+  ),
+  R2 = c(
+    R2(pred_tree_all, test_all$wage),
+    R2(pred_tree_pos, test_pos$wage),
+    R2(pred_tree_log_wage, test_pos$wage)
+  )
+)
+
+results_tree
 ```
 
 ## Random Forest
 ```{r}
+library(randomForest)
+```
+```{r}
+# Model 1: wage (all)
+set.seed(123)
+rf_all <- randomForest(
+  wage ~ .,
+  data = train_all,
+  ntree = 300,
+  importance = TRUE
+)
 
+# Model 2: wage (no zeros)
+set.seed(123)
+rf_pos <- randomForest(
+  wage ~ .,
+  data = train_pos,
+  ntree = 300,
+  importance = TRUE
+)
+
+# Model 3: log(wage)
+set.seed(123)
+rf_log <- randomForest(
+  log_wage ~ . - wage,
+  data = train_log,
+  ntree = 300,
+  importance = TRUE
+)
+```
+```{r}
+pred_rf_all <- predict(rf_all, newdata = test_all)
+
+pred_rf_pos <- predict(rf_pos, newdata = test_pos)
+
+pred_rf_log <- predict(rf_log, newdata = test_log)
+pred_rf_log_wage <- exp(pred_rf_log)
+```
+```{r}
+results_rf <- data.frame(
+  Model = c("RF - wage (all)", "RF - wage (no zeros)", "RF - log(wage)"),
+  RMSE = c(
+    RMSE(pred_rf_all, test_all$wage),
+    RMSE(pred_rf_pos, test_pos$wage),
+    RMSE(pred_rf_log_wage, test_pos$wage)
+  ),
+  MAE = c(
+    MAE(pred_rf_all, test_all$wage),
+    MAE(pred_rf_pos, test_pos$wage),
+    MAE(pred_rf_log_wage, test_pos$wage)
+  ),
+  R2 = c(
+    R2(pred_rf_all, test_all$wage),
+    R2(pred_rf_pos, test_pos$wage),
+    R2(pred_rf_log_wage, test_pos$wage)
+  )
+)
+
+results_rf
+```
+
+```{r}
+importance(rf_all)
+varImpPlot(
+  rf_all,
+  n.var = 15,
+  cex = 0.7,
+  main = "Top 15 Important Variables"
+)
+
+importance_df <- data.frame(
+  Variable = rownames(importance(rf_all)),
+  IncMSE = importance(rf_all)[, "%IncMSE"],
+  NodePurity = importance(rf_all)[, "IncNodePurity"]
+)
+
+rownames(importance_df) <- NULL
+
+top_mse <- importance_df[
+  order(-importance_df$IncMSE),
+]
+
+top_mse <- head(top_mse, 15)
+
+top_purity <- importance_df[
+  order(-importance_df$NodePurity),
+]
+
+top_purity <- head(top_purity, 15)
+
+par(mar = c(5, 25, 4, 2))
+
+barplot(
+  rev(top_mse$IncMSE),
+  names.arg = rev(top_mse$Variable),
+  horiz = TRUE,
+  las = 1,
+  cex.names = 0.7,
+  main = "Top 15 Variables by % Increase in MSE",
+  xlab = "% Increase in MSE"
+)
+
+par(mar = c(5, 25, 4, 2))
+
+barplot(
+  rev(top_purity$NodePurity),
+  names.arg = rev(top_purity$Variable),
+  horiz = TRUE,
+  las = 1,
+  cex.names = 0.7,
+  main = "Top 15 Variables by Node Purity",
+  xlab = "Increase in Node Purity"
+)
 ```
 
 ## Gradient Boosting Models
 ```{r}
+library(gbm)
+```
+```{r}
+# Model 1: wage (all)
+set.seed(123)
+gbm_all <- gbm(
+  formula = wage ~ .,
+  data = train_all,
+  distribution = "gaussian",
+  n.trees = 300,
+  interaction.depth = 4,
+  shrinkage = 0.03,
+  verbose = FALSE
+)
 
+# Model 2: wage (no zeros)
+set.seed(123)
+gbm_pos <- gbm(
+  wage ~ .,
+  data = train_pos,
+  distribution = "gaussian",
+  n.trees = 300,
+  interaction.depth = 4,
+  shrinkage = 0.03,
+  verbose = FALSE
+)
+
+# Model 3: log(wage)
+set.seed(123)
+gbm_log <- gbm(
+  log_wage ~ . - wage,
+  data = train_log,
+  distribution = "gaussian",
+  n.trees = 300,
+  interaction.depth = 4,
+  shrinkage = 0.03,
+  verbose = FALSE
+)
+```
+
+
+```{r}
+pred_gbm_all <- predict(gbm_all, test_all, n.trees = 300)
+
+pred_gbm_pos <- predict(gbm_pos, test_pos, n.trees = 300)
+
+pred_gbm_log <- predict(gbm_log, test_log, n.trees = 300)
+pred_gbm_log_wage <- exp(pred_gbm_log)
+```
+
+
+```{r}
+results_gbm <- data.frame(
+  Model = c("GBM - wage (all)", "GBM - wage (no zeros)", "GBM - log(wage)"),
+  RMSE = c(
+    RMSE(pred_gbm_all, test_all$wage),
+    RMSE(pred_gbm_pos, test_pos$wage),
+    RMSE(pred_gbm_log_wage, test_pos$wage)
+  ),
+  MAE = c(
+    MAE(pred_gbm_all, test_all$wage),
+    MAE(pred_gbm_pos, test_pos$wage),
+    MAE(pred_gbm_log_wage, test_pos$wage)
+  ),
+  R2 = c(
+    R2(pred_gbm_all, test_all$wage),
+    R2(pred_gbm_pos, test_pos$wage),
+    R2(pred_gbm_log_wage, test_pos$wage)
+  )
+)
+
+results_gbm
 ```
 
 ## XG Boost
 ```{r}
+library(xgboost)
+```
+```{r}
+train_xgb_model <- function(train_data, test_data, target, log_model = FALSE) {
+  
+  # Create model matrices
+  x_train <- model.matrix(
+    as.formula(paste(target, "~ .")),
+    data = train_data
+  )[ , -1]
+  
+  x_test <- model.matrix(
+    as.formula(paste(target, "~ .")),
+    data = test_data
+  )[ , -1]
+  
+  y_train <- train_data[[target]]
+  
+  # Train XGBoost
+  model <- xgboost(
+    data = x_train,
+    label = y_train,
+    objective = "reg:squarederror",
+    nrounds = 300,
+    max_depth = 4,
+    eta = 0.05,
+    subsample = 0.8,
+    colsample_bytree = 0.8,
+    verbose = 0
+  )
+  
+  # Predict
+  pred <- predict(model, x_test)
+  
+  if (log_model) {
+    pred <- exp(pred)
+  }
+  
+  return(list(model = model, pred = pred))
+}
+```
+```{r}
+# XGBoost 1: wage all
+set.seed(123)
+xgb_all <- train_xgb_model(
+  train_all,
+  test_all,
+  target = "wage"
+)
 
+# XGBoost 2: wage no zeros
+set.seed(123)
+xgb_pos <- train_xgb_model(
+  train_pos,
+  test_pos,
+  target = "wage"
+)
+
+# XGBoost 3: log wage
+set.seed(123)
+xgb_log <- train_xgb_model(
+  train_log[, !(names(train_log) %in% "wage")],
+  test_log[, !(names(test_log) %in% "wage")],
+  target = "log_wage",
+  log_model = TRUE
+)
+```
+```{r}
+results_xgb <- data.frame(
+  Model = c("XGB - wage (all)", "XGB - wage (no zeros)", "XGB - log(wage)"),
+  RMSE = c(
+    RMSE(xgb_all$pred, test_all$wage),
+    RMSE(xgb_pos$pred, test_pos$wage),
+    RMSE(xgb_log$pred, test_log$wage)
+  ),
+  MAE = c(
+    MAE(xgb_all$pred, test_all$wage),
+    MAE(xgb_pos$pred, test_pos$wage),
+    MAE(xgb_log$pred, test_log$wage)
+  ),
+  R2 = c(
+    R2(xgb_all$pred, test_all$wage),
+    R2(xgb_pos$pred, test_pos$wage),
+    R2(xgb_log$pred, test_log$wage)
+  )
+)
+
+results_xgb
+```
+```{r}
+importance_xgb <- xgb.importance(
+  feature_names = xgb_all$model$feature_names,
+  model = xgb_all$model
+)
+
+xgb.plot.importance(importance_xgb, top_n = 20)
 ```
 
 ## Neural Network
@@ -482,6 +818,74 @@ cat("RMSE (Linear Regression):", RMSE(linear_regression_model_predictions, data_
 
 # Model Comparison
 ```{r}
+results_all <- rbind(
+  results_lm,
+  results_tree,
+  results_rf,
+  results_gbm,
+  results_xgb
+)
+
+results_all[order(results_all$RMSE), ]
+results_all[order(results_all$MAE), ]
+results_all[order(-results_all$R2), ]
+```
+
+# H20
+## AutoML
+```{r}
+# Installing & initializing H20. In case you have past installations, you should run 
+# lines 37-45. If this is the first time installing, you can only run lines 46-47.
+if ("package:h2o" %in% search()) { detach("package:h2o", unload=TRUE) }
+if ("h2o" %in% rownames(installed.packages())) { remove.packages("h2o") }
+pkgs <- c("RCurl","jsonlite")
+for (pkg in pkgs) {
+  if (! (pkg %in% rownames(installed.packages()))) { install.packages(pkg) }
+}
+install.packages("h2o", type="source", repos=(c("http://h2o-release.s3.amazonaws.com/h2o/latest_stable_R")))
+library(h2o)
+```
+```{r}
+# Call other necessary libraries 
+library(data.table)
+library(writexl)
+library(readr)
+```
+```{r, message=FALSE, warning=FALSE}
+# Initialize H2O cluster
+h2o.init()
+h2o.no_progress()
+```
+```{r}
+# Set the dataframe as h2o environment 
+df <- as.h2o(data_clean)
+```
+```{r}
+# Split dataset into training and validation sets
+set.seed(12)
+splits <- h2o.splitFrame(df, ratios = c(0.8))
+train <- splits[[1]]
+valid <- splits[[2]]
+```
+```{r}
+# Set the dependent variable 
+dep_var <- "wage"
+```
+```{r}
+automl <- h2o.automl(
+  x = setdiff(colnames(df), dep_var), # independent variables
+  y = dep_var, # dependent variable
+  training_frame = train,
+  max_runtime_secs = 600, # maximum time in seconds for AutoML to run
+  seed = 12 # set seed for reproducibility
+)
+```
+```{r,message=FALSE, warning=FALSE }
+# View leaderboard of models generated by AutoML
+lb <- automl@leaderboard
+lb_table <- as.data.frame(lb)
+
+knitr::kable(lb_table)
 
 ```
 
