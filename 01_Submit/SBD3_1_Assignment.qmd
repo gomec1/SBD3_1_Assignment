@@ -1,9 +1,22 @@
 ---
-title: "SBD3_1_Assignment"
-format: html
+title: "SBD3 1 Assignment Group 2"
+format:
+  html:
+    df-print: paged
 ---
+
+# Introduction
+
+We worked through every step of the project together including data exploration, cleaning, modelling and explainability. Our plan was to start with a simple linear regression as a baseline, then move to decision tree, random forest, gradient boosting, XGBoost so we could compare a wider range of models. After that, we picked one final model based on RMSE, MAE and R². Then we looked at which features mattered most, and used that model to predict our own future wages.
+
 # Libraries
+
+First we load the important libraries.
+
 ```{r}
+#| results: 'hide'
+#| message: false
+#| warning: false
 library(dlookr)
 library(rsample)
 library(caret)
@@ -21,6 +34,9 @@ library(xgboost)
 ```
 
 # Setup
+
+We clear the workspace, turn off scientific notation so wage values are easier to read, and fix a global seed.
+
 ```{r}
 rm(list=ls())
 options(scipen=999)
@@ -28,54 +44,70 @@ set.seed(123)
 ```
 
 # Loading Data
+
+The dataset is loaded from the provided `.RData` file. A first `head()` lets us check what the variables look like.
+
 ```{r}
 load("data_wage.RData")
 head(data)
 ```
 
 # Data Checks
+
+Before modelling anything, we wanted to understand the dataset. We ran `summary()`, `diagnose()` and `str()` to check the variable types, the value ranges and whether there were missing values.
+
 ```{r}
+#| output: false
 summary(data)
 ```
 
 ```{r}
 diagnose(data)
-# No Missing Values in the Dataset
-# All the numeric variables have only 2 values (0 and 1) except the target variable wage
+
 ```
 
+There are no missing values in the dataset and almost all numeric variables are binary 0/1 dummies. The only real numeric variable is the target `wage`.
+
 ```{r}
+#| output: false
+#| message: false
+#| warning: false
 str(data)
 
-# All the non numeric variables are factors with levels.
 ```
 
+All non-numeric variables are factors with levels.
+
 ```{r}
+#| message: false
+#| warning: false
+#| output: false
 colnames(data)
-# Some of the Columns do not really add any value when considering the other variables in the dataset
-# For example:
-#
-# "Activities_None.of.these.activities.are.an.important.part.of.my.role.at.work"
-# "Notebooks_None" 
-# "cloud_I.have.not.used.any.cloud.providers" 
-# "ML_framework_None"
-# "Visualization_None"
-# "explainability.model_None.I.do.not.use.these.model.explanation.techniques"
+
 ```
+
+Some of the Columns do not really add any value when considering the other variables in the dataset. A few columns just encode the "None of the above" answer (for example Notebooks_None, cloud_I.have.not.used.any.cloud.providers, ML_framework_None), but we kept them in for now and let the models decide.
+
 ## Numeric
 
 ### Target Variable
+
+The target variable `wage` is right-skewed with a long tail and a large standard deviation. The mean is much higher than the median, which means a small group of very high earners is pulling the average up.
+
 ```{r}
 summary(data$wage)
 sd(data$wage)
-# right skewed distribution with a long tail. The mean is higher than the median, which indicates that there are some high wage values that are pulling the average up. The standard deviation is also quite large, which suggests that there is a lot of variability in wages among the individuals in the dataset.
+
 ```
 
+The boxplot and histogram below confirm the skew. We see a peak near zero and a long tail going up to several hundred thousand USD.
 
 ```{r}
 boxplot(data$wage, horizontal = TRUE, main = "Boxplot of Wage", xlab = "Wage")
 hist(data$wage, breaks = 50, main = "Histogram of Wage", xlab = "Wage")
 ```
+
+To check if a log transformation makes the target more symmetric, we plotted `log(wage)` for positive wages only. The shape is much closer to normal, so a log model is worth trying.
 
 ```{r}
 # Log Wage
@@ -83,18 +115,26 @@ hist(log(data$wage[data$wage > 0]), breaks = 50, main = "Histogram of log(wage)"
 boxplot(log(data$wage[data$wage > 0]), horizontal = TRUE)
 ```
 
+We then looked at how many respondents reported a wage of zero. These could be students, unemployed people or interns, but we cannot tell from the data. Because the share of zeros is non-trivial, we decided to also build a version of the dataset without them and to compare results.
+
 ```{r}
 # 0 in Target variable "wage"
 sum(data$wage == 0)
 prop.table(table(data$wage == 0))
 data_no_0_wage <- data[data$wage > 0, ]
 ```
+
+After removing the zeros, the distribution still has a long right tail but no longer has the spike at zero.
+
 ```{r}
 boxplot(data_no_0_wage$wage, horizontal = TRUE, main = "Boxplot of Wage", xlab = "Wage")
 hist(data_no_0_wage$wage, breaks = 50, main = "Histogram of Wage", xlab = "Wage")
 ```
 
 ### Features
+
+The numeric features other than `wage` are all 0/1 dummies coming from the multi-select survey questions. We checked one of them, `Notebooks_None`, as an example. The frequency tables looked similar for the other one-hot variables.
+
 ```{r}
 #Frequency
 print(table(data$Notebooks_None))
@@ -103,8 +143,14 @@ print(table(data$Notebooks_None))
 print(prop.table(table(data$Notebooks_None))) 
 ```
 
-
 ## Factors
+
+For the categorical variables, we checked the levels, frequencies and proportions, and whether they were ordered. By default they were all unordered. We discussed which ones actually have a natural ranking (such as age or years of experience) so we could later set them as ordered factors.
+
+Two variables in particular gave us some discussion:
+
+-   `ML_atwork`: at first we thought "I do not know" was useless, but it could be a meaningful answer (interns, juniors, people who don't work). We could not agree on a clean ordering for the other categories either, so we kept this one unordered.
+-   `Do.you.consider.yourself.to.be.a.data.scientist.`: this is purely subjective and depends on how the respondent feels about themselves on a given day. We decided to drop it later in the cleaning step.
 
 ```{r}
 #Levels
@@ -118,37 +164,20 @@ print(round(prop.table(table(data$gender)), 2))
 
 #Ordered
 print(is.ordered(data$gender))
-# All the factors are unordered
-
-#Variable = ML_atWork
-#At first, we thought that the response "I do not know" would not be useful. However, it could be that interns genuinely do not know this. Additionally, there are many 
-#people who are not working—what did they select? Possibly this answer as well. There should be an answer option such as "I do not work".
-
-
-#Variable = Do.you.consider.yourself.to.be.a.data.scientist
-#The responses are purely subjective, which is why we will probably remove this variable.
 ```
-
 
 # Data Cleaning
 
 ## Order Factors
-```{r}
-# The following (factor) variables were treated as ordered:
-# - Age
-# - years_experience
-# - How.long.have.you.been.writing.code.to.analyze.data.
-# - percent_actively.coding
-# - For.how.many.years.have.you.used.machine.learning.methods..at.work.or.in.school..
-# - Do.you.consider.yourself.to.be.a.data.scientist.
-# - ML_atWork
-```
+
+We re-coded the factors that have a natural ranking as ordered factors. It gives the linear regression a sensible ordering when it builds dummy contrasts, and it also makes it easier to read the variable summaries. The variables we treated as ordered are listed below. The other factors stay unordered because their categories don't have a clear hierarchy (for example gender, country, undergraduate major, job role, industry, programming language, ML at work).
 
 ```{r}
 # Gender
 levels(data$gender)
 data$gender <- factor(data$gender, ordered = FALSE)
 ```
+
 ```{r}
 # Age
 levels(data$age)
@@ -160,6 +189,7 @@ data$age <- factor(
   ordered = TRUE
 )
 ```
+
 ```{r}
 # Country
 levels(data$country)
@@ -181,13 +211,15 @@ data$education <- factor(
   ),
   ordered = FALSE
 )
-# Professional degree is hard to rank here. Maybe we should make this unordered.
+
 ```
+
 ```{r}
 # undergraduate_major
 levels(data$undergraduate_major)
 data$undergraduate_major <- factor(data$undergraduate_major, ordered = FALSE)
 ```
+
 ```{r}
 # job_role 
 levels(data$job_role)
@@ -199,6 +231,7 @@ data$job_role <- factor(data$job_role, ordered = FALSE)
 levels(data$industry)
 data$industry <- factor(data$industry, ordered = FALSE)
 ```
+
 ```{r}
 # years_experience
 levels(data$years_experience)
@@ -210,6 +243,9 @@ data$years_experience <- factor(
   ordered = TRUE
 )
 ```
+
+We also wanted to order this variable, but we could not agree, as the ordering depends on the perspective taken.
+
 ```{r}
 # ML_atwork
 levels(data$ML_atwork)
@@ -226,13 +262,17 @@ data$ML_atwork <- factor(
     ordered = FALSE
   )
 
-# We also wanted to order this variable, but we could not agree, as the ordering depends on the perspective taken.
+
 ```
+
+We also wanted to order this variable, but we could not agree, as the ordering depends on the perspective taken.
+
 ```{r}
 # Programming_language_used_most_often
 levels(data$Programming_language_used_most_often)
 data$Programming_language_used_most_often <- factor(data$Programming_language_used_most_often, ordered = FALSE)
 ```
+
 ```{r}
 # percent_actively.coding
 levels(data$percent_actively.coding)
@@ -244,6 +284,7 @@ data$percent_actively.coding <- factor(
   ordered = TRUE
 )
 ```
+
 ```{r}
 # How.long.have.you.been.writing.code.to.analyze.data.
 levels(data$How.long.have.you.been.writing.code.to.analyze.data.)
@@ -264,6 +305,7 @@ data$How.long.have.you.been.writing.code.to.analyze.data. <- factor(
   ordered = TRUE
 )
 ```
+
 ```{r}
 # For.how.many.years.have.you.used.machine.learning.methods..at.work.or.in.school..
 levels(data$For.how.many.years.have.you.used.machine.learning.methods..at.work.or.in.school..)
@@ -285,6 +327,7 @@ data$For.how.many.years.have.you.used.machine.learning.methods..at.work.or.in.sc
   ordered = TRUE
 )
 ```
+
 ```{r}
 # Do.you.consider.yourself.to.be.a.data.scientist.
 levels(data$Do.you.consider.yourself.to.be.a.data.scientist.)
@@ -300,13 +343,17 @@ data$Do.you.consider.yourself.to.be.a.data.scientist. <- factor(
   ordered = TRUE
 )
 ```
+
 ## Outliers
-```{r}
-# Just as a reminder if necessary
-```
+
+The wage distribution has a heavy right tail, but those high values are not data errors. They are real high earners. Tree-based models are not very sensitive to extreme values, and we also test a log-transformed version of the target, so we did not trim or cap any observations.
 
 # Exploratory Data Analysis
+
 ## Variable Correlation
+
+We started the EDA with a correlation matrix of the numeric variables. Since most of them are 0/1 dummies, we did quick check using the Pearson correlations. We then filtered for the strongest pairwise correlations (absolute value above 0.5) so we could see at a glance which variables move together.
+
 ```{r}
 # Select numeric variables
 num_data <- data[, sapply(data, is.numeric)]
@@ -323,6 +370,7 @@ corrplot(
   main = "Correlation Matrix of Numeric Variabels"
 )
 ```
+
 ```{r}
 # Higher correlations only (Threshold: > 0.5 or < -0.5)
 high_corr <- which(
@@ -343,21 +391,21 @@ high_corr <- high_corr[
 
 head(high_corr, 20)
 ```
+
 ## Target Correlation
+
+Because the goal of the project is to predict `wage`, we also computed the correlation of every numeric variable with the target. The strongest individual correlations are weak (none of them very close to 1), which already tells us that no single dummy variable is going to explain wages on its own. The wage signal is spread across many variables, which is exactly the kind of situation where tree methods usually work well.
+
 ```{r}
-# Correlation of all numeric variables with wage
 cor_target <- cor(num_data, use = "complete.obs")[, "wage"]
 
-# Remove wage itself
 cor_target <- cor_target[names(cor_target) != "wage"]
 
-# Convert to dataframe
 cor_target_df <- data.frame(
   Variable = names(cor_target),
   Correlation = cor_target
 )
 
-# Sort by absolute correlation
 cor_target_df <- cor_target_df[
   order(-abs(cor_target_df$Correlation)),
 ]
@@ -368,19 +416,29 @@ head(cor_target_df, 20)
 ```
 
 # Data Preparation
+
+Two cleaning steps before splitting the data:
+
+1.  The `country` variable has more than 53 levels. The `randomForest` package cannot handle categorical predictors with more than 53 categories, so we used `fct_lump()` to keep the top 52 countries and group the rest into "Other".
+2.  We dropped `Do.you.consider.yourself.to.be.a.data.scientist.` because it is a subjective self-assessment that we don't trust as a wage predictor.
+
 ```{r}
 data_clean <- data
-
-# Reducing the amount of levels in the country variable by lumping together the least frequent ones into "Other".
-# This is for Tree Models that can not handle more than 53 levels in factors.
-# We keep the top 52 countries(52 + Other = 53)
 data_clean$country <- fct_lump(data_clean$country, n = 52)
 
-# Removing subjective variable
 data_clean$Do.you.consider.yourself.to.be.a.data.scientist. <- NULL
 ```
 
 # General Train Test Split
+
+We split the data 70/30 into training and test sets. To handle the wage = 0 spike and the right skew, we built three parallel versions of the train/test sets and ran every model on each of them:
+
+-   **Version A — wage (all):** original target, including the zeros.
+-   **Version B — wage (no zeros):** drop respondents with wage = 0. The idea is that these may be people who are not really earning a salary (students, unemployed) and may pull the model in odd directions.
+-   **Version C — log(wage):** the log-transformed target on positive wages only. Predictions are back-transformed with `exp()` before computing the error metrics, so the numbers are comparable in USD.
+
+This way we avoid committing to one preprocessing choice up front and let the test-set results decide.
+
 ```{r}
 #Split the Data
 split <- initial_split(data_clean, prop = 0.7)
@@ -388,7 +446,6 @@ split <- initial_split(data_clean, prop = 0.7)
 data_train <- training(split)
 data_test  <- testing(split)
 
-# Different Data sets to use and compare
 # Version A: keep wage = 0
 train_all <- data_train
 test_all  <- data_test
@@ -419,7 +476,12 @@ hist(test_log$wage)
 
 # Models
 
-## Linear Regression (Benchmark)
+We trained five model families: linear regression as a benchmark, decision tree, random forest, gradient boosting (gbm) and XGBoost. For every model we ran the three target variants (all, no zeros, log) and compared them on the same test set using RMSE, MAE and R². RMSE counts larger errors more, MAE gives an average error in USD that is easier to read, and R² shows how much variance the model explains.
+
+## Linear Regression
+
+We start with linear regression because it is simple, fast and easy to interpret. It also gives us a baseline, any more complex model has to beat it to be worth keeping.
+
 ```{r}
 # Model 1: wage (all)
 set.seed(123)
@@ -433,6 +495,7 @@ lm_pos <- lm(wage ~ ., data = train_pos)
 set.seed(123)
 lm_log <- lm(log_wage ~ . - wage, data = train_log)
 ```
+
 ```{r}
 # Predictions
 pred_all <- predict(lm_all, newdata = test_all)
@@ -465,7 +528,11 @@ results_lm <- data.frame(
 
 results_lm
 ```
+
 ## Decision Tree
+
+A single decision tree is the next step up. It can pick up non-linear patterns and interactions that linear regression misses, and the splits are easy to read. The downside is high variance, because a single tree often overfits and is sensitive to the exact training sample. We also decided to use "anova" method.
+
 ```{r}
 # Model 1: wage (all)
 set.seed(123)
@@ -491,6 +558,7 @@ tree_log <- rpart(
   method = "anova"
 )
 ```
+
 ```{r}
 pred_tree_all <- predict(tree_all, newdata = test_all)
 
@@ -499,6 +567,7 @@ pred_tree_pos <- predict(tree_pos, newdata = test_pos)
 pred_tree_log <- predict(tree_log, newdata = test_log)
 pred_tree_log_wage <- exp(pred_tree_log)
 ```
+
 ```{r}
 results_tree <- data.frame(
   Model = c("Tree - wage (all)", "Tree - wage (no zeros)", "Tree - log(wage)"),
@@ -523,6 +592,9 @@ results_tree
 ```
 
 ## Random Forest
+
+The random forest fixes the high-variance problem of a single tree by averaging many trees, each trained on a bootstrap sample with a random subset of features. This usually gives a clear boost in accuracy on tabular data with mixed numeric and categorical predictors, which is exactly our situation. We grew 1,000 trees per model and turned on `importance = TRUE` so we can rank the features later.
+
 ```{r}
 # Model 1: wage (all)
 set.seed(123)
@@ -551,6 +623,7 @@ rf_log <- randomForest(
   importance = TRUE
 )
 ```
+
 ```{r}
 pred_rf_all <- predict(rf_all, newdata = test_all)
 
@@ -559,6 +632,7 @@ pred_rf_pos <- predict(rf_pos, newdata = test_pos)
 pred_rf_log <- predict(rf_log, newdata = test_log)
 pred_rf_log_wage <- exp(pred_rf_log)
 ```
+
 ```{r}
 results_rf <- data.frame(
   Model = c("RF - wage (all)", "RF - wage (no zeros)", "RF - log(wage)"),
@@ -582,8 +656,17 @@ results_rf <- data.frame(
 results_rf
 ```
 
+We also looked at variable importance for the random forest trained on the full wage data (`rf_all`). The two metrics we used are `%IncMSE` and `IncNodePurity`. They tend to agree on the top variables but the ordering can be slightly different. We use `%IncMSE` later as the criterion for our reduced final model.
+
 ```{r}
+#| message: false
+#| warning: false
+#| output: false
 importance(rf_all)
+```
+
+```{r}
+
 varImpPlot(
   rf_all,
   n.var = 15,
@@ -637,6 +720,9 @@ barplot(
 ```
 
 ## Gradient Boosting Models
+
+Gradient boosting builds trees sequentially and each new tree tries to correct the errors of the previous ones. This often improves performance, but it is also more sensitive to the hyper-parameters. We used a Gaussian loss (regression), 1,000 trees, an interaction depth of 4, and a shrinkage of 0.03, a slow learning rate that usually generalises better than a fast one.
+
 ```{r}
 # Model 1: wage (all)
 set.seed(123)
@@ -675,7 +761,6 @@ gbm_log <- gbm(
 )
 ```
 
-
 ```{r}
 pred_gbm_all <- predict(gbm_all, test_all, n.trees = 1000)
 
@@ -684,7 +769,6 @@ pred_gbm_pos <- predict(gbm_pos, test_pos, n.trees = 1000)
 pred_gbm_log <- predict(gbm_log, test_log, n.trees = 1000)
 pred_gbm_log_wage <- exp(pred_gbm_log)
 ```
-
 
 ```{r}
 results_gbm <- data.frame(
@@ -708,16 +792,20 @@ results_gbm <- data.frame(
 
 results_gbm
 ```
+
+The `summary()` of a `gbm` object prints relative influence for each variable, which gives us a second view of feature importance to compare with the random forest.
+
 ```{r}
 summary(gbm_all)
 ```
 
-
 ## XG Boost
+
+XGBoost is another gradient boosting library and a faster implementation. It does not accept a formula directly and it needs a numeric matrix, so we wrote a small helper that builds the model matrix, trains the model, predicts on the test set and optionally transforms the log predictions. We use the same three target versions as before.
+
 ```{r}
 train_xgb_model <- function(train_data, test_data, target, log_model = FALSE) {
   
-  # Create model matrices
   x_train <- model.matrix(
     as.formula(paste(target, "~ .")),
     data = train_data
@@ -730,7 +818,6 @@ train_xgb_model <- function(train_data, test_data, target, log_model = FALSE) {
   
   y_train <- train_data[[target]]
   
-  # Train XGBoost
   model <- xgboost(
     data = x_train,
     label = y_train,
@@ -743,7 +830,6 @@ train_xgb_model <- function(train_data, test_data, target, log_model = FALSE) {
     verbose = 0
   )
   
-  # Predict
   pred <- predict(model, x_test)
   
   if (log_model) {
@@ -753,7 +839,10 @@ train_xgb_model <- function(train_data, test_data, target, log_model = FALSE) {
   return(list(model = model, pred = pred))
 }
 ```
+
 ```{r}
+#| message: false
+#| warning: false
 # XGBoost 1: wage all
 set.seed(123)
 xgb_all <- train_xgb_model(
@@ -779,6 +868,7 @@ xgb_log <- train_xgb_model(
   log_model = TRUE
 )
 ```
+
 ```{r}
 results_xgb <- data.frame(
   Model = c("XGB - wage (all)", "XGB - wage (no zeros)", "XGB - log(wage)"),
@@ -801,6 +891,9 @@ results_xgb <- data.frame(
 
 results_xgb
 ```
+
+XGBoost has its own importance function (`xgb.importance`) which we plotted for the top 20 features. This gives us a third view of feature importance to put alongside the random forest and GBM rankings.
+
 ```{r}
 importance_xgb <- xgb.importance(
   feature_names = xgb_all$model$feature_names,
@@ -811,6 +904,11 @@ xgb.plot.importance(importance_xgb, top_n = 20)
 ```
 
 # Model Comparison
+
+We stacked the results of all 15 model variants of 5 algorithms x 3 target versions and sorted by each metric. RMSE, MAE and R² mostly agreed on the ranking, but it was useful to look at all three because RMSE punishes the few very large errors more, while MAE is closer to the typical USD error a user would see.
+
+The random forest trained on the full target (`RF - wage (all)`) came out best on RMSE and was very competitive on MAE and R². Gradient boosting was also strong, but the random forest was more stable across the three target versions, which made us trust it more. We picked it as the final model.
+
 ```{r}
 results_all <- rbind(
   results_lm,
@@ -826,6 +924,9 @@ results_all[order(-results_all$R2), ]
 ```
 
 # Final Model
+
+The final model is the random forest trained on the full training set `train_all`, using the original wage as target. We re-train it explicitly here so the rest of the report works with one clear final object `rf_final`.
+
 ```{r}
 # Model Final: wage (all)
 set.seed(123)
@@ -836,9 +937,11 @@ rf_final <- randomForest(
   importance = TRUE
 )
 ```
+
 ```{r}
 pred_rf_final <- predict(rf_final, newdata = test_all)
 ```
+
 ```{r}
 results_rf_final <- data.frame(
   Model = c("RF Final - wage (all)"),
@@ -855,8 +958,17 @@ results_rf_final <- data.frame(
 
 results_rf_final
 ```
+
+The variable importance plot below shows which features drive the wage predictions.
+
 ```{r}
+#| message: false
+#| warning: false
+#| output: false
 importance(rf_final)
+```
+
+```{r}
 varImpPlot(
   rf_final,
   n.var = 15,
@@ -865,23 +977,101 @@ varImpPlot(
 )
 ```
 
+The top features are mostly about country, age, years of experience and how long the respondent has been writing code which basically matches what we would expect intuitively. Some of the framework variables also show up, which may inidcate that the type of stack a respondent uses correlates with how senior or specialised their role is.
+
+## Feature choice
+
+We then were wondering if we actually need all 76 predictors since a smaller model is easier to explain, faster to train and less likely to be confused by noise. We ranked the features by `%IncMSE` from `rf_final` and retrained the random forest using only the top 15.
+
+```{r}
+importance_final <- data.frame(
+  Variable = rownames(importance(rf_final)),
+  IncMSE = importance(rf_final)[, "%IncMSE"],
+  NodePurity = importance(rf_final)[, "IncNodePurity"]
+)
+
+rownames(importance_final) <- NULL
+
+top_mse_final <- importance_final[
+  order(-importance_final$IncMSE),
+]
+top_mse_final <- head(top_mse_final, 15)
+
+top_mse_final
+```
+
+```{r}
+top_vars <- as.character(top_mse_final$Variable)
+
+train_top <- train_all[, c("wage", top_vars)]
+test_top  <- test_all[, c("wage", top_vars)]
+
+set.seed(123)
+rf_top <- randomForest(
+  wage ~ .,
+  data = train_top,
+  ntree = 1000,
+  importance = TRUE
+)
+```
+
+```{r}
+pred_rf_top <- predict(rf_top, newdata = test_top)
+```
+
+```{r}
+results_rf_top <- data.frame(
+  Model = c("RF Final - Top 15 by %IncMSE"),
+  RMSE = c(
+    RMSE(pred_rf_top, test_top$wage)
+  ),
+  MAE = c(
+    MAE(pred_rf_top, test_top$wage)
+  ),
+  R2 = c(
+    R2(pred_rf_top, test_top$wage)
+  )
+)
+
+results_rf_top
+```
+
+## Final Comparison: All Features vs. Top Features
+
+We put the all features and the top 15 random forests side by side and sorted by each metric so we can see the comparison. If the reduced model is comparable, we would prefer it. Fewer features means a simpler, faster and easier to explain model. If the full model is clearly better, we keep `rf_final` instead. We use the table below as the basis for that decision and stick with the all features model for the wage predictions in the next section because it gave us the best test RMSE overall.
+
+```{r}
+results_final_comparison <- rbind(
+  results_rf_final,
+  results_rf_top
+)
+
+results_final_comparison[order(results_final_comparison$RMSE), ]
+
+```
+
 # Our Wage Prediction
+
+The last part is to use our model to predict the future wage of each team member. Each of us filled in the survey for ourselves and saved the answers as an `.RData` file. We filled the data with our "future answers" so we can predict the salary in couple of years. We feed those files into `rf_final` and read off the predicted yearly wage in USD.
 
 ## Data
 
 ### Anna
+
 ```{r}
 anna <- get(load("anna.RData"))
 head(anna)
 ```
 
 ### Carlos
+
 ```{r}
 carlos <- get(load("carlos.RData"))
 head(carlos)
 ```
 
 ### Thomas
+
 ```{r}
 thomas <- get(load("thomas.RData"))
 head(thomas)
@@ -890,22 +1080,30 @@ head(thomas)
 ## Prediction
 
 ### Anna
+
 ```{r}
 pred_anna = predict(rf_final, newdata = anna)
 pred_anna
 ```
+
 ### Carlos
+
 ```{r}
 pred_carlos = predict(rf_final, newdata = carlos)
 pred_carlos
 ```
+
 ### Thomas
+
 ```{r}
 pred_thomas = predict(rf_final, newdata = thomas)
 pred_thomas
 ```
 
 ## Results
+
+The final table puts the three predictions side by side. The differences between us reflect the input we filled in. The test RMSE of the random forest is still in the order of tens of thousands of USD, so the predicted wage is best read as a general figure for someone with this profile.
+
 ```{r}
 final_predictions <- data.frame(
   Person = c("Anna", "Carlos", "Thomas"),
@@ -914,3 +1112,15 @@ final_predictions <- data.frame(
 
 final_predictions
 ```
+
+# Conclusion
+
+The random forest trained on the full data was our best model on the test set. Linear regression set a baseline that the tree-based methods clearly beat, the single decision tree was the weakest of the tree models as expected, given its high variance, and gradient boosting and XGBoost were close behind the random forest. Across all five algorithms, the wage-all version of the target was the most stable choice, so we did not need the no zero wages or log transformed targets in the end.
+
+For explainability, the random forest importance plot, the GBM relative influence and the XGBoost gain plot all pointed at the same top variables - country, age, years of experience, time spent writing code, and the type of programming languages and ML frameworks used. This matches what we would expect that country and seniority are the biggest drivers of wage in a global survey. Reducing the model to the top 15 features by `%IncMSE` produced a model that was competitive with the full one but a bit weaker on RMSE, which is why we kept `rf_final` for the final predictions.
+
+A few limitations we are aware of:
+
+-   The dataset is from a single survey, so the results show the people who chose to answer it. Some countries and roles are over or under represented.
+-   We did not tune hyper-parameters with cross-validation. A grid search on `mtry`, `ntree` and the boosting parameters would probably squeeze a little more performance out of the models.
+-   Our personal predictions assume the same wage structure that exists in the survey data. If we are predicting for the future, real wages may shift over time and our estimates would need to be recalculated.
