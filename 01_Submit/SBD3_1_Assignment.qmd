@@ -29,6 +29,8 @@ library(rpart.plot)
 library(randomForest)
 
 library(gbm)
+library(kernelshap)
+library(shapviz)
 
 library(xgboost)
 ```
@@ -417,10 +419,9 @@ head(cor_target_df, 20)
 
 # Data Preparation
 
-Two cleaning steps before splitting the data:
+The survey has 60+ different countries, but the responses are heavily skewed towards the US (around 2,500 respondents, by far the biggest group), followed by India and China. Many other countries only have a handful of answers each. Because randomForest can't handle factors with more than 53 levels, we used fct_lump() to keep the top 52 countries and group the rest into "Other". We also discussed dropping the country column entirely. The argument was that the US dominates the dataset so heavily that the model is really learning "US wage distribution" and using every other country as a relative adjustment. For countries with few respondents which is most of them outside the top 5-10, the wage estimate is based on a thin sample and can be skewed by a handful of high or low earners. We decided to keep country in the end because removing it would have hurt the test RMSE significantly, and country is one of the strongest signals about wage in the real world.
 
-1.  The `country` variable has more than 53 levels. The `randomForest` package cannot handle categorical predictors with more than 53 categories, so we used `fct_lump()` to keep the top 52 countries and group the rest into "Other".
-2.  We dropped `Do.you.consider.yourself.to.be.a.data.scientist.` because it is a subjective self-assessment that we don't trust as a wage predictor.
+We dropped `Do.you.consider.yourself.to.be.a.data.scientist.` because it is a subjective self-assessment that we don't trust as a wage predictor.
 
 ```{r}
 data_clean <- data
@@ -1102,7 +1103,41 @@ pred_thomas
 
 ## Results
 
-The final table puts the three predictions side by side. The differences between us reflect the input we filled in. The test RMSE of the random forest is still in the order of tens of thousands of USD, so the predicted wage is best read as a general figure for someone with this profile.
+Our `rf_final` keeps country, job_role, industry and the other categorical variables as factors, so treeshap rejects it. We had two options. The first was to one-hot encode every categorical variable, retrain the random forest on the resulting numeric matrix, and then run Tree SHAP. That would have changed the final model since the splits in a one-hot RF are different from the splits in a multi-level factor RF, and we would have lost the structure where each country or each role is a single splittable feature. The second option was to keep `rf_final` as it is and use a kernelshap function which works with any prediction function, so we did not need to retrain anything.
+
+```{r}
+model_features <- setdiff(names(train_all), "wage")
+set.seed(123)
+bg <- train_all[sample(nrow(train_all), 200), model_features]
+
+anna_X <- anna[, model_features, drop = FALSE]
+ks_anna <- kernelshap(rf_final, X = anna_X, bg_X = bg)
+
+sv_anna <- shapviz(ks_anna)
+sv_waterfall(sv_anna, row_id = 1, max_display = 15)
+```
+
+Almost the entire gap below the baseline comes from country = Poland at -27,365. The survey is dominated by US, Indian and Western European respondents, so the model has learned that Polish wages are well below the global average. Age 25-29 adds another -4,976 on top. So even tho the model recognizes experience it's still considered the lowest pay in our predictions, because of the geographic gap.
+
+```{r}
+carlos_X <- carlos[, model_features, drop = FALSE]
+ks_carlos <- kernelshap(rf_final, X = carlos_X, bg_X = bg)
+
+sv_carlos <- shapviz(ks_carlos)
+sv_waterfall(sv_carlos, row_id = 1, max_display = 15)
+```
+
+For Carlos the Swiss country effect adds +24,720 because Switzerland is one of the highest paying countries in the survey, but industry = I am a student subtracts -15,113 because students in the dataset usually report low or zero wages. Software Engineer adds +5,298 since it's a well-paid role in the data, age 25-29 takes off -5,259 because younger respondents earn less and not using ML at work removes another -4,812.
+
+```{r}
+thomas_X <- thomas[, model_features, drop = FALSE]
+ks_thomas <- kernelshap(rf_final, X = thomas_X, bg_X = bg)
+
+sv_thomas <- shapviz(ks_thomas)
+sv_waterfall(sv_thomas, row_id = 1, max_display = 15)
+```
+
+Thomas gets the same pay for being Swiss +21,883, but without the student drag. Age 30-34 helps a little more (+4,136) since 30+ is the bracket where most experienced respondents sit.
 
 ```{r}
 final_predictions <- data.frame(
@@ -1112,6 +1147,8 @@ final_predictions <- data.frame(
 
 final_predictions
 ```
+
+Country is doing most of the work. Carlos and Thomas each gain about +22k from being in Switzerland; Anna loses about -27k for being in Poland. That single variable makes roughly \$50k of the difference between Anna and Thomas before any other feature kicks in. The main caveat we noticed is that the model treats country as a fixed attribute, which is exactly what it is in the training data but not in real life. If any of us moved abroad, the model would predict a completely different wage for the same person and the country contribution alone would swing the result by tens of thousands of USD.
 
 # Conclusion
 

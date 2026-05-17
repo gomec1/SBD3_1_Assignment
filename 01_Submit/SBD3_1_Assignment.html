@@ -123,8 +123,10 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(randomForest)</span>
 <span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb1-12"><a href="#cb1-12" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(gbm)</span>
-<span id="cb1-13"><a href="#cb1-13" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb1-14"><a href="#cb1-14" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(xgboost)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<span id="cb1-13"><a href="#cb1-13" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(kernelshap)</span>
+<span id="cb1-14"><a href="#cb1-14" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(shapviz)</span>
+<span id="cb1-15"><a href="#cb1-15" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-16"><a href="#cb1-16" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(xgboost)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </div>
 </section>
 <section id="setup" class="level1">
@@ -756,11 +758,8 @@ Prefer to self-describe
 </section>
 <section id="data-preparation" class="level1">
 <h1>Data Preparation</h1>
-<p>Two cleaning steps before splitting the data:</p>
-<ol type="1">
-<li>The <code>country</code> variable has more than 53 levels. The <code>randomForest</code> package cannot handle categorical predictors with more than 53 categories, so we used <code>fct_lump()</code> to keep the top 52 countries and group the rest into “Other”.</li>
-<li>We dropped <code>Do.you.consider.yourself.to.be.a.data.scientist.</code> because it is a subjective self-assessment that we don’t trust as a wage predictor.</li>
-</ol>
+<p>The survey has 60+ different countries, but the responses are heavily skewed towards the US (around 2,500 respondents, by far the biggest group), followed by India and China. Many other countries only have a handful of answers each. Because randomForest can’t handle factors with more than 53 levels, we used fct_lump() to keep the top 52 countries and group the rest into “Other”. We also discussed dropping the country column entirely. The argument was that the US dominates the dataset so heavily that the model is really learning “US wage distribution” and using every other country as a relative adjustment. For countries with few respondents which is most of them outside the top 5-10, the wage estimate is based on a thin sample and can be skewed by a handful of high or low earners. We decided to keep country in the end because removing it would have hurt the test RMSE significantly, and country is one of the strongest signals about wage in the real world.</p>
+<p>We dropped <code>Do.you.consider.yourself.to.be.a.data.scientist.</code> because it is a subjective self-assessment that we don’t trust as a wage predictor.</p>
 <div class="cell">
 <div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb80"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb80-1"><a href="#cb80-1" aria-hidden="true" tabindex="-1"></a>data_clean <span class="ot">&lt;-</span> data</span>
 <span id="cb80-2"><a href="#cb80-2" aria-hidden="true" tabindex="-1"></a>data_clean<span class="sc">$</span>country <span class="ot">&lt;-</span> <span class="fu">fct_lump</span>(data_clean<span class="sc">$</span>country, <span class="at">n =</span> <span class="dv">52</span>)</span>
@@ -1599,14 +1598,69 @@ Prefer to self-describe
 </section>
 <section id="results" class="level2">
 <h2 class="anchored" data-anchor-id="results">Results</h2>
-<p>The final table puts the three predictions side by side. The differences between us reflect the input we filled in. The test RMSE of the random forest is still in the order of tens of thousands of USD, so the predicted wage is best read as a general figure for someone with this profile.</p>
+<p>Our <code>rf_final</code> keeps country, job_role, industry and the other categorical variables as factors, so treeshap rejects it. We had two options. The first was to one-hot encode every categorical variable, retrain the random forest on the resulting numeric matrix, and then run Tree SHAP. That would have changed the final model since the splits in a one-hot RF are different from the splits in a multi-level factor RF, and we would have lost the structure where each country or each role is a single splittable feature. The second option was to keep <code>rf_final</code> as it is and use a kernelshap function which works with any prediction function, so we did not need to retrain anything.</p>
 <div class="cell">
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb130"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb130-1"><a href="#cb130-1" aria-hidden="true" tabindex="-1"></a>final_predictions <span class="ot">&lt;-</span> <span class="fu">data.frame</span>(</span>
-<span id="cb130-2"><a href="#cb130-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">Person =</span> <span class="fu">c</span>(<span class="st">"Anna"</span>, <span class="st">"Carlos"</span>, <span class="st">"Thomas"</span>),</span>
-<span id="cb130-3"><a href="#cb130-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">Predicted_Wage_USD =</span> <span class="fu">round</span>(<span class="fu">c</span>(pred_anna, pred_carlos, pred_thomas), <span class="dv">0</span>)</span>
-<span id="cb130-4"><a href="#cb130-4" aria-hidden="true" tabindex="-1"></a>)</span>
-<span id="cb130-5"><a href="#cb130-5" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb130-6"><a href="#cb130-6" aria-hidden="true" tabindex="-1"></a>final_predictions</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb130"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb130-1"><a href="#cb130-1" aria-hidden="true" tabindex="-1"></a>model_features <span class="ot">&lt;-</span> <span class="fu">setdiff</span>(<span class="fu">names</span>(train_all), <span class="st">"wage"</span>)</span>
+<span id="cb130-2"><a href="#cb130-2" aria-hidden="true" tabindex="-1"></a><span class="fu">set.seed</span>(<span class="dv">123</span>)</span>
+<span id="cb130-3"><a href="#cb130-3" aria-hidden="true" tabindex="-1"></a>bg <span class="ot">&lt;-</span> train_all[<span class="fu">sample</span>(<span class="fu">nrow</span>(train_all), <span class="dv">200</span>), model_features]</span>
+<span id="cb130-4"><a href="#cb130-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb130-5"><a href="#cb130-5" aria-hidden="true" tabindex="-1"></a>anna_X <span class="ot">&lt;-</span> anna[, model_features, drop <span class="ot">=</span> <span class="cn">FALSE</span>]</span>
+<span id="cb130-6"><a href="#cb130-6" aria-hidden="true" tabindex="-1"></a>ks_anna <span class="ot">&lt;-</span> <span class="fu">kernelshap</span>(rf_final, <span class="at">X =</span> anna_X, <span class="at">bg_X =</span> bg)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Kernel SHAP values by the hybrid strategy of degree 1</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb132"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb132-1"><a href="#cb132-1" aria-hidden="true" tabindex="-1"></a>sv_anna <span class="ot">&lt;-</span> <span class="fu">shapviz</span>(ks_anna)</span>
+<span id="cb132-2"><a href="#cb132-2" aria-hidden="true" tabindex="-1"></a><span class="fu">sv_waterfall</span>(sv_anna, <span class="at">row_id =</span> <span class="dv">1</span>, <span class="at">max_display =</span> <span class="dv">15</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="SBD3_1_Assignment_files/figure-html/unnamed-chunk-70-1.png" class="img-fluid figure-img" width="672"></p>
+</figure>
+</div>
+</div>
+</div>
+<p>Almost the entire gap below the baseline comes from country = Poland at -27,365. The survey is dominated by US, Indian and Western European respondents, so the model has learned that Polish wages are well below the global average. Age 25-29 adds another -4,976 on top. So even tho the model recognizes experience it’s still considered the lowest pay in our predictions, because of the geographic gap.</p>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb133"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb133-1"><a href="#cb133-1" aria-hidden="true" tabindex="-1"></a>carlos_X <span class="ot">&lt;-</span> carlos[, model_features, drop <span class="ot">=</span> <span class="cn">FALSE</span>]</span>
+<span id="cb133-2"><a href="#cb133-2" aria-hidden="true" tabindex="-1"></a>ks_carlos <span class="ot">&lt;-</span> <span class="fu">kernelshap</span>(rf_final, <span class="at">X =</span> carlos_X, <span class="at">bg_X =</span> bg)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Kernel SHAP values by the hybrid strategy of degree 1</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb135"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb135-1"><a href="#cb135-1" aria-hidden="true" tabindex="-1"></a>sv_carlos <span class="ot">&lt;-</span> <span class="fu">shapviz</span>(ks_carlos)</span>
+<span id="cb135-2"><a href="#cb135-2" aria-hidden="true" tabindex="-1"></a><span class="fu">sv_waterfall</span>(sv_carlos, <span class="at">row_id =</span> <span class="dv">1</span>, <span class="at">max_display =</span> <span class="dv">15</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="SBD3_1_Assignment_files/figure-html/unnamed-chunk-71-1.png" class="img-fluid figure-img" width="672"></p>
+</figure>
+</div>
+</div>
+</div>
+<p>For Carlos the Swiss country effect adds +24,720 because Switzerland is one of the highest paying countries in the survey, but industry = I am a student subtracts -15,113 because students in the dataset usually report low or zero wages. Software Engineer adds +5,298 since it’s a well-paid role in the data, age 25-29 takes off -5,259 because younger respondents earn less and not using ML at work removes another -4,812.</p>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb136"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb136-1"><a href="#cb136-1" aria-hidden="true" tabindex="-1"></a>thomas_X <span class="ot">&lt;-</span> thomas[, model_features, drop <span class="ot">=</span> <span class="cn">FALSE</span>]</span>
+<span id="cb136-2"><a href="#cb136-2" aria-hidden="true" tabindex="-1"></a>ks_thomas <span class="ot">&lt;-</span> <span class="fu">kernelshap</span>(rf_final, <span class="at">X =</span> thomas_X, <span class="at">bg_X =</span> bg)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Kernel SHAP values by the hybrid strategy of degree 1</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb138"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb138-1"><a href="#cb138-1" aria-hidden="true" tabindex="-1"></a>sv_thomas <span class="ot">&lt;-</span> <span class="fu">shapviz</span>(ks_thomas)</span>
+<span id="cb138-2"><a href="#cb138-2" aria-hidden="true" tabindex="-1"></a><span class="fu">sv_waterfall</span>(sv_thomas, <span class="at">row_id =</span> <span class="dv">1</span>, <span class="at">max_display =</span> <span class="dv">15</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="SBD3_1_Assignment_files/figure-html/unnamed-chunk-72-1.png" class="img-fluid figure-img" width="672"></p>
+</figure>
+</div>
+</div>
+</div>
+<p>Thomas gets the same pay for being Swiss +21,883, but without the student drag. Age 30-34 helps a little more (+4,136) since 30+ is the bracket where most experienced respondents sit.</p>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb139"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb139-1"><a href="#cb139-1" aria-hidden="true" tabindex="-1"></a>final_predictions <span class="ot">&lt;-</span> <span class="fu">data.frame</span>(</span>
+<span id="cb139-2"><a href="#cb139-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">Person =</span> <span class="fu">c</span>(<span class="st">"Anna"</span>, <span class="st">"Carlos"</span>, <span class="st">"Thomas"</span>),</span>
+<span id="cb139-3"><a href="#cb139-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">Predicted_Wage_USD =</span> <span class="fu">round</span>(<span class="fu">c</span>(pred_anna, pred_carlos, pred_thomas), <span class="dv">0</span>)</span>
+<span id="cb139-4"><a href="#cb139-4" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb139-5"><a href="#cb139-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb139-6"><a href="#cb139-6" aria-hidden="true" tabindex="-1"></a>final_predictions</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <div class="cell-output-display">
 <div data-pagedtable="false">
   <script data-pagedtable-source="" type="application/json">
@@ -1615,6 +1669,7 @@ Prefer to self-describe
 </div>
 </div>
 </div>
+<p>Country is doing most of the work. Carlos and Thomas each gain about +22k from being in Switzerland; Anna loses about -27k for being in Poland. That single variable makes roughly $50k of the difference between Anna and Thomas before any other feature kicks in. The main caveat we noticed is that the model treats country as a fixed attribute, which is exactly what it is in the training data but not in real life. If any of us moved abroad, the model would predict a completely different wage for the same person and the country contribution alone would swing the result by tens of thousands of USD.</p>
 </section>
 </section>
 <section id="conclusion" class="level1">
